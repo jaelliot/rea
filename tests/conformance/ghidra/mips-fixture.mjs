@@ -14,6 +14,7 @@ export async function buildMipsFixture(directory, byteOrder) {
   const compiler = process.env.REA_MIPS_CLANG ?? "clang";
   const target = byteOrder === "little" ? "mipsel-linux-gnu" : "mips-linux-gnu";
   const source = fileURLToPath(new URL("../c/mips.c", import.meta.url));
+  const probe = fileURLToPath(new URL("./mips-probe.S", import.meta.url));
   const path = join(directory, `${target}.elf`);
   const args = [
     `--target=${target}`,
@@ -29,6 +30,7 @@ export async function buildMipsFixture(directory, byteOrder) {
     "-Wl,-e,rea_mips_entry",
     "-Wl,--build-id=none",
     source,
+    probe,
     "-o",
     path,
   ];
@@ -62,6 +64,9 @@ export async function buildMipsFixture(directory, byteOrder) {
     sha256: createHash("sha256").update(bytes).digest("hex"),
     source_sha256: createHash("sha256")
       .update(await readFile(source))
+      .digest("hex"),
+    probe_sha256: createHash("sha256")
+      .update(await readFile(probe))
       .digest("hex"),
     compiler: version.stdout.trim(),
     arguments: args,

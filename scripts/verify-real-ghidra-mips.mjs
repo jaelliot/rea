@@ -9,6 +9,13 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { Client } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
+import { parseBinaryTarget } from "../dist/application/BinaryTargetResolver.js";
+import {
+  inspectMipsReadelf,
+  assertMipsLoadedImage,
+  assertMipsProbe,
+  assertMipsGlobal,
+} from "../tests/conformance/ghidra/mips-checks.mjs";
 import { parseEvidence } from "../dist/domain/evidence.js";
 import { parseAnalysisSnapshot } from "../dist/domain/analysisSnapshot.js";
 import { functionDossierSchema } from "../dist/domain/hopperValues.js";
@@ -58,6 +65,15 @@ let primaryFailure;
 try {
   for (const byteOrder of ["little", "big"]) {
     const fixture = await buildMipsFixture(workspace, byteOrder);
+    const independent = await inspectMipsReadelf(fixture.path, byteOrder);
+    const resolved = await parseBinaryTarget(fixture.path);
+    if (!resolved.ok) throw resolved.error;
+    assert.deepEqual(
+      resolved.value.mips,
+      independent.mips,
+      "REA ELF/ABI interpretation disagrees with GNU readelf",
+    );
+    assert.equal(resolved.value.sha256, fixture.sha256);
     const snapshotPath = join(workspace, `${byteOrder}.snapshot.json`);
     const transport = new StdioClientTransport({
       command: process.execPath,
@@ -86,11 +102,49 @@ try {
       });
       assert.equal(target.architecture, "mips");
       assert.equal(target.sha256, fixture.sha256);
+      // ELF load-image verification is not the DOS comparison lane. Its retained
+      // observations still expose the actual Ghidra language and loaded bytes.
+      const image = await call("inspect_native_load_image");
+      assertMipsLoadedImage(image.observations, byteOrder, fixture.sha256);
       const procedures = await call("list_procedures");
       const entry = procedures.find((p) => p.value === "rea_mips_entry");
       const leaf = procedures.find((p) => p.value === "rea_mips_leaf");
       assert.ok(entry, "Entry function missing from real Ghidra inventory");
       assert.ok(leaf, "Leaf function missing from real Ghidra inventory");
+      assert.equal(
+        BigInt(entry.address),
+        BigInt(independent.symbols.rea_mips_entry),
+      );
+      assert.equal(
+        BigInt(leaf.address),
+        BigInt(independent.symbols.rea_mips_leaf),
+      );
+      const probe = independent.symbols.rea_mips_probe;
+      assert.ok(
+        procedures.some(
+          (p) =>
+            p.value === "rea_mips_probe" && BigInt(p.address) === BigInt(probe),
+        ),
+      );
+      const move = await call("inspect_native_instruction", { address: probe });
+      const branch = await call("inspect_native_instruction", {
+        address: `0x${(BigInt(probe) + 4n).toString(16)}`,
+      });
+      assertMipsProbe(move, branch, byteOrder, probe);
+      const global = await call("read_bytes", {
+        address: independent.symbols.rea_mips_global,
+        length: 4,
+      });
+      assert.equal(global.returned_bytes, 4);
+      assertMipsGlobal(global.bytes_hex, byteOrder);
+      const marker = await call("read_bytes", {
+        address: independent.symbols.rea_mips_marker,
+        length: 30,
+      });
+      assert.equal(
+        marker.bytes_hex,
+        Buffer.from("rea-mips-source-owned-fixture\0").toString("hex"),
+      );
       const callees = await call("procedure_callees", {
         procedure: entry.address,
       });
@@ -175,6 +229,17 @@ try {
       );
       reports.push({
         ...fixture,
+        independent_reader: independent,
+        effective_language: image.observations.language_id,
+        effective_compiler_spec: image.observations.compiler_spec_id,
+        checks: [
+          "independent ELF/ABI and symbols",
+          "loaded Ghidra identity",
+          "fixed instruction bytes and immediate",
+          "conditional branch destination",
+          "global word and marker bytes",
+          "CLI/MCP and snapshot identity",
+        ],
         procedures: procedures.length,
         status: "passed",
       });

@@ -65,16 +65,36 @@ REA's ELF parser.
 
 The source-owned freestanding fixture is `tests/conformance/c/mips.c`. The
 optional cross-target lane requires a caller-supplied Clang with MIPS targets,
-LLD, Ghidra and its compatible JDK; ordinary host-native checks do not acquire
-these tools. `REA_MIPS_CLANG` can select the Clang executable.
+LLD, GNU `readelf`, Ghidra and its compatible JDK; ordinary host-native checks
+do not acquire these tools. `REA_MIPS_CLANG` selects Clang and
+`REA_MIPS_READELF` selects GNU readelf (for example `greadelf` on macOS).
+These are test-time prerequisites, not REA runtime providers.
 
 ```bash
 GHIDRA_INSTALL_DIR=/absolute/path/to/ghidra npm run verify:ghidra:mips
 ```
 
-The lane compiles both byte orders, never executes the targets, checks real
-CLI/MCP discovery and decompilation, references, target hashes, profile/Evidence
-identity, snapshot round-trip and final process cleanup. Parser/profile tests
-are narrower checks, not substitutes for this real-provider run. A contribution
-must report the actual lanes run and leave unexecuted provider verification
-explicitly pending.
+The lane compiles both byte orders and never executes the targets. GNU readelf
+independently supplies header/ABI facts and symbol addresses, compared with the
+production REA target resolver before provider startup. Its version, bounded
+command output and selected tool path are retained in the verification report.
+The parser deliberately recognizes only this fixture's GNU output, rejecting
+missing, ambiguous or unexpected fields rather than substituting defaults.
+
+Existing public MCP operations check Ghidra's **observed** language/compiler
+specification and loaded-file hashes. The source-owned `mips-probe.S` supplies
+fixed ADDIU and conditional-branch encodings: verification checks bytes, length,
+immediate and direct destination, independent of decompiler variable names.
+Global and string bytes are checked at independently reported symbol addresses.
+ELF load-image results retain observations even though REA's independent
+load-image comparison currently covers DOS, not ELF; this lane checks those
+observations and does not relabel the upstream result as verified.
+
+CLI/MCP discovery and decompilation, direct calls, target/profile/Evidence
+identity, snapshot round-trip and final process cleanup remain covered.
+Pseudocode presence is a liveness check, not proof of semantic equivalence.
+Instruction decoding and reader agreement likewise do not establish runtime,
+delay-slot execution or complete floating-point semantics. Assertion regressions
+reject incorrect byte order, constants, destinations and loaded identities.
+Parser/profile tests are narrower checks, not substitutes for this real-provider
+run. Report the actual lanes run and leave unexecuted verification pending.
