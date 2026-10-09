@@ -24,33 +24,44 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: 03d82b75558f355702d0c8b01aa06552f30d73f5
+          ref: adf1cda29859ffcc063f40418b8ba39a0eac4fab
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version-file: .nvmrc
           cache: npm
       - name: Locked runtime and build
-        run: |
-          node --version
-          npm --version
-          npm ci
-          npm run build:cached
-      - name: Provision only this ephemeral verification runner
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/mips-result"
+          node --version
+          npm --version
+          npm ci
+          npm run build:cached
+      - name: Actual focused regressions and unchanged repository gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run test:focused -- src/domain/binaryTarget.mips.test.ts src/ghidra/GhidraMipsProfile.test.ts src/ghidra/GhidraProvider.behavior.test.ts src/hopper/HopperMachOImage.test.ts tests/boundary/filesystem/mipsAbiFlags.test.ts tests/composition/analysis-sessions/mips-identity.test.ts tests/conformance/ghidra/mips-checks.test.ts 2>&1 | tee "$RUNNER_TEMP/mips-result/focused.log"
+          npm run check:ci 2>&1 | tee "$RUNNER_TEMP/mips-result/check-ci.log"
+          npm run verify:test-discovery 2>&1 | tee "$RUNNER_TEMP/mips-result/discovery.log"
+          npm run docs:check 2>&1 | tee "$RUNNER_TEMP/mips-result/docs-check.log"
+      - name: Provision only this ephemeral verification runner
+        shell: bash
+        run: |
+          set -euo pipefail
           git rev-parse HEAD | tee "$RUNNER_TEMP/mips-result/source-sha.txt"
           test -n "${JAVA_HOME_21_X64:-}"
           echo "JAVA_HOME=$JAVA_HOME_21_X64" >> "$GITHUB_ENV"
           "$JAVA_HOME_21_X64/bin/java" -version 2>&1 | tee "$RUNNER_TEMP/mips-result/java.txt"
-          if ! command -v clang >/dev/null || ! command -v ld.lld >/dev/null; then
+          if ! command -v clang >/dev/null || ! command -v ld.lld >/dev/null || ! command -v readelf >/dev/null; then
             sudo apt-get update -qq
-            sudo apt-get install --no-install-recommends -y clang lld
+            sudo apt-get install --no-install-recommends -y clang lld binutils
           fi
           clang --version | tee "$RUNNER_TEMP/mips-result/clang.txt"
           ld.lld --version | tee "$RUNNER_TEMP/mips-result/lld.txt"
+          readelf --version | tee "$RUNNER_TEMP/mips-result/readelf.txt"
           URL='https://github.com/NationalSecurityAgency/ghidra/releases/download/Ghidra_12.1.4_build/ghidra_12.1.4_PUBLIC_20260921.zip'
           curl --fail --location --retry 2 --max-time 180 "$URL" -o "$RUNNER_TEMP/ghidra.zip"
           echo "ddac49f903da9d5bac833e5cc79395098b9c33cfd3279be5f31bd00387d2d4db  $RUNNER_TEMP/ghidra.zip" | sha256sum --check
@@ -76,7 +87,7 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
-          name: real-mips-ghidra-03d82b7
+          name: real-mips-ghidra-adf1cda
           path: |
             ${{ runner.temp }}/mips-result/
             ${{ runner.temp }}/mips-native-tmp/
