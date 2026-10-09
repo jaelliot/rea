@@ -24,7 +24,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: b0438d9037d2dee4b2dd5ee569bf0991eb04ab3b
+          ref: 03d82b75558f355702d0c8b01aa06552f30d73f5
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
@@ -76,7 +76,7 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
-          name: real-mips-ghidra-b0438d9
+          name: real-mips-ghidra-03d82b7
           path: |
             ${{ runner.temp }}/mips-result/
             ${{ runner.temp }}/mips-native-tmp/
