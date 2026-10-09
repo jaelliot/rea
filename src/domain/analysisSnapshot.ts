@@ -9,7 +9,10 @@ import {
   committedProviderSchema,
   type AnalysisProfileCommitment,
 } from "./analysisProfile.js";
-import type { BinaryTarget } from "./binaryTargetTypes.js";
+import {
+  BINARY_ARCHITECTURES,
+  type BinaryTarget,
+} from "./binaryTargetTypes.js";
 import {
   evidenceBundleForTarget,
   evidenceBundleSchema,
@@ -29,7 +32,7 @@ import {
 import { digestSchema } from "./../domain/digests.js";
 import { prefixedDigestSchema } from "./../domain/digests.js";
 
-const architectureSchema = z.enum(["x86", "x86_64", "arm", "arm64"]);
+const architectureSchema = z.enum(BINARY_ARCHITECTURES);
 const formatSchema = z.enum([
   "analysis-database",
   "mach-o",
