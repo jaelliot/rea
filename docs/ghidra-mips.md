@@ -21,6 +21,12 @@ variants, shared/relocatable objects and PSP PRX are not covered by this lane.
 Their family may be identified, but provider selection returns the specific
 unsupported constraint rather than guessing a compatible profile.
 
+Explicit `EF_MIPS_FP64` and `EF_MIPS_NAN2008` declarations are also refused:
+the integer-only fixture does not establish those floating-point semantics.
+Their absence is not a complete floating-point ABI check; toolchains can carry
+additional ABI information in `.MIPS.abiflags`. This lane does not yet inspect
+that section or claim floating-point conformance.
+
 MIPS facts are committed in the analysis profile so interpretation changes
 invalidate profile-bound snapshots. Evidence, lifecycle outputs and saved
 snapshots preserve the `mips` family. Hopper and IDA adapters do not implicitly

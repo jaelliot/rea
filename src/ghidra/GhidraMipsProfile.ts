@@ -25,6 +25,12 @@ export const ghidraMipsUnsupportedReason = (
     (metadata.flags & 0x20) !== 0
   )
     return "This Ghidra MIPS lane requires an explicit o32 ABI; unspecified, n32 and EABI targets remain unsupported.";
+  // These modes change floating-point interpretation independently of o32/ISA.
+  // Do not admit them based solely on the integer-only conformance fixture.
+  if ((metadata.flags & 0x00000200) !== 0)
+    return "EF_MIPS_FP64 requires separate verification of 64-bit floating-point register semantics in this Ghidra lane.";
+  if ((metadata.flags & 0x00000400) !== 0)
+    return "EF_MIPS_NAN2008 requires separate verification of NaN encoding semantics in this Ghidra lane.";
   return null;
 };
 
@@ -45,6 +51,6 @@ export const ghidraMipsProfileParameters = (
       type: target.mips.type,
       flags: target.mips.flags,
     },
-    mips_support_lane: "elf32-exec-o32-arch32r2-standard-v1",
+    mips_support_lane: "elf32-exec-o32-arch32r2-standard-v2",
   };
 };
