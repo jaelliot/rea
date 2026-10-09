@@ -6,6 +6,7 @@ on:
     paths:
       - .github/workflows/fork-mips-validation.yml
       - validation/mips-ci-fix.patch
+      - validation/mips-verifier-entry.patch
 
 permissions:
   contents: read
@@ -17,8 +18,10 @@ concurrency:
 env:
   HUSKY: "0"
   TURBO_TELEMETRY_DISABLED: "1"
+  TURBO_FORCE: "true"
   SOURCE_SHA: e064d8473f80695332c81aa66a8bafd667e1db6d
   PATCH_SHA256: 48db673ea33018fc7a3ffb5ccf354cd5346879ecde2ef14cd9cf771a97392f54
+  ENTRY_PATCH_SHA256: 1bdd22732ada3ed267f587ba46ed904449f1806e1e285473367968b413f84ba6
 
 jobs:
   verify:
@@ -30,35 +33,53 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Apply exactly the reviewed patch to its original source
+      - name: Apply reviewed patches and record exact source
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/verified-mips"
           cp validation/mips-ci-fix.patch "$RUNNER_TEMP/verified-mips/change.patch"
+          cp validation/mips-verifier-entry.patch "$RUNNER_TEMP/verified-mips/entry.patch"
           echo "$PATCH_SHA256  $RUNNER_TEMP/verified-mips/change.patch" | sha256sum --check
+          echo "$ENTRY_PATCH_SHA256  $RUNNER_TEMP/verified-mips/entry.patch" | sha256sum --check
           git checkout --detach "$SOURCE_SHA"
-          git apply --check "$RUNNER_TEMP/verified-mips/change.patch"
           git apply --index "$RUNNER_TEMP/verified-mips/change.patch"
-          git write-tree > "$RUNNER_TEMP/verified-mips/tree-sha.txt"
+          git apply --index "$RUNNER_TEMP/verified-mips/entry.patch"
+          git write-tree | tee "$RUNNER_TEMP/verified-mips/tree-sha.txt"
           git diff --cached --check
           git diff --cached --stat
+          git diff --cached --binary > "$RUNNER_TEMP/verified-mips/combined.patch"
+          git ls-files -s .jscpd.json knip.json src/domain/binaryTargetTypes.ts src/ghidra/GhidraMipsProfile.ts src/ghidra/GhidraAnalysisProfile.ts | tee "$RUNNER_TEMP/verified-mips/source-blobs.txt"
+          cat .jscpd.json knip.json
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version-file: .nvmrc
           cache: npm
       - run: npm ci
       - name: Repository static checks
-        run: npm run check:ci
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run check:ci 2>&1 | tee "$RUNNER_TEMP/verified-mips/check-ci.log"
       - name: Confirm test discovery
-        run: npm run verify:test-discovery
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run verify:test-discovery 2>&1 | tee "$RUNNER_TEMP/verified-mips/discovery.log"
       - name: Real focused tests through production build
-        run: npm run test:focused -- src/domain/binaryTarget.mips.test.ts src/ghidra/GhidraMipsProfile.test.ts src/hopper/HopperMachOImage.test.ts src/ghidra/GhidraProvider.behavior.test.ts tests/boundary/filesystem/mipsAbiFlags.test.ts tests/composition/analysis-sessions/mips-identity.test.ts
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run test:focused -- src/domain/binaryTarget.mips.test.ts src/ghidra/GhidraMipsProfile.test.ts src/hopper/HopperMachOImage.test.ts src/ghidra/GhidraProvider.behavior.test.ts tests/boundary/filesystem/mipsAbiFlags.test.ts tests/composition/analysis-sessions/mips-identity.test.ts 2>&1 | tee "$RUNNER_TEMP/verified-mips/focused.log"
       - name: Generated metadata and documentation contracts
-        run: npm run docs:check
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run docs:check 2>&1 | tee "$RUNNER_TEMP/verified-mips/docs.log"
       - name: Ensure validators did not edit the candidate
         run: git diff --exit-code
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
         with:
           name: verified-mips-patch
           path: ${{ runner.temp }}/verified-mips/
@@ -87,11 +108,13 @@ jobs:
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
           echo "$PATCH_SHA256  /tmp/verified-mips/change.patch" | sha256sum --check
+          echo "$ENTRY_PATCH_SHA256  /tmp/verified-mips/entry.patch" | sha256sum --check
           git apply --index /tmp/verified-mips/change.patch
+          git apply --index /tmp/verified-mips/entry.patch
           test "$(git write-tree)" = "$(cat /tmp/verified-mips/tree-sha.txt)"
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git -c core.hooksPath=/dev/null commit -m 'fix(native): repair MIPS integration boundaries and test resolver behavior' -m 'Keep ELF targets out of the Hopper Mach-O preparation path and scope existing PE test fixtures to their supported architectures. Move filesystem ABI tests into the boundary lane, use shared test cleanup, add full target-resolver regressions, and apply the pinned formatter. Validated using the repository-pinned Node/npm, check:ci, focused Vitest, test discovery and docs:check. Real Ghidra conformance remains a separate gate.'
+          git -c core.hooksPath=/dev/null commit -m 'fix(native): repair MIPS integration boundaries and test resolver behavior' -m 'Keep ELF targets out of Hopper Mach-O preparation and scope existing PE fixture types correctly. Move ABI tests into the filesystem boundary lane, use shared cleanup, add resolver regressions, apply the pinned formatter, and register the real MIPS verifier through the existing package-command pattern. Validated with repository-pinned Node/npm, check:ci, actual focused Vitest, discovery and docs:check. Real Ghidra conformance remains pending.'
           BRANCH="ci/mips-tested-${GITHUB_RUN_ID}"
           git push origin "HEAD:refs/heads/$BRANCH"
           echo "Candidate branch: $BRANCH" >> "$GITHUB_STEP_SUMMARY"
