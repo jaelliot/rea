@@ -1,0 +1,432 @@
+diff --git a/scripts/verify-real-ghidra-mips.mjs b/scripts/verify-real-ghidra-mips.mjs
+index ceeba09..38a8f4d 100644
+--- a/scripts/verify-real-ghidra-mips.mjs
++++ b/scripts/verify-real-ghidra-mips.mjs
+@@ -201,8 +201,11 @@ if (
+     { cause: primaryFailure },
+   );
+ if (primaryFailure !== undefined)
+-  throw new Error(`MIPS verification failed; retained workspace: ${workspace}`, {
+-    cause: primaryFailure,
+-  });
++  throw new Error(
++    `MIPS verification failed; retained workspace: ${workspace}`,
++    {
++      cause: primaryFailure,
++    },
++  );
+ await rm(workspace, { recursive: true, force: true });
+ console.log(JSON.stringify({ ...completed, fixtures: reports }, null, 2));
+diff --git a/src/application/BinaryTargetResolver.ts b/src/application/BinaryTargetResolver.ts
+index 5cc3955..6171886 100644
+--- a/src/application/BinaryTargetResolver.ts
++++ b/src/application/BinaryTargetResolver.ts
+@@ -339,10 +339,8 @@ const readExecutableMetadata = async (
+     parsed.value.mips.elfClass !== 32
+   )
+     return parsed;
+-  const abiFlags = await readMipsElfAbiFlags(
+-    handle,
+-    parsed.value.mips,
+-    () => throwIfTargetResolutionCancelled(signal),
++  const abiFlags = await readMipsElfAbiFlags(handle, parsed.value.mips, () =>
++    throwIfTargetResolutionCancelled(signal),
+   );
+   if (!abiFlags.ok) return abiFlags;
+   return ok({
+diff --git a/src/application/MipsElfAbiFlags.ts b/src/application/MipsElfAbiFlags.ts
+index 83bd160..cf6a47d 100644
+--- a/src/application/MipsElfAbiFlags.ts
++++ b/src/application/MipsElfAbiFlags.ts
+@@ -45,8 +45,7 @@ export const readMipsElfAbiFlags = async (
+         offset + total,
+       );
+       checkCancelled();
+-      if (observed.bytesRead === 0)
+-        return err(`truncated MIPS ${label}`);
++      if (observed.bytesRead === 0) return err(`truncated MIPS ${label}`);
+       total += observed.bytesRead;
+     }
+     return ok(bytes);
+diff --git a/src/domain/binaryTarget.mips.test.ts b/src/domain/binaryTarget.mips.test.ts
+index e4085b2..e646dae 100644
+--- a/src/domain/binaryTarget.mips.test.ts
++++ b/src/domain/binaryTarget.mips.test.ts
+@@ -3,9 +3,7 @@ import { parseExecutableHeader } from "./binaryTarget.js";
+ 
+ const header = (little: boolean, bits: 32 | 64 = 32): Buffer => {
+   const bytes = Buffer.alloc(bits === 32 ? 52 : 64);
+-  bytes.set([
+-    0x7f, 0x45, 0x4c, 0x46, bits === 32 ? 1 : 2, little ? 1 : 2, 1,
+-  ]);
++  bytes.set([0x7f, 0x45, 0x4c, 0x46, bits === 32 ? 1 : 2, little ? 1 : 2, 1]);
+   if (little) {
+     bytes.writeUInt16LE(2, 16);
+     bytes.writeUInt16LE(8, 18);
+diff --git a/src/ghidra/GhidraMipsProfile.test.ts b/src/ghidra/GhidraMipsProfile.test.ts
+index d764f21..698a4cf 100644
+--- a/src/ghidra/GhidraMipsProfile.test.ts
++++ b/src/ghidra/GhidraMipsProfile.test.ts
+@@ -88,10 +88,15 @@ describe("bounded Ghidra MIPS admission", () => {
+       },
+     });
+     expect(left.value.profile?.digest).not.toBe(right.value.profile?.digest);
+-    const windows = new GhidraProvider(config, silentLogger, {}, {
+-      ...host,
+-      platform: "win32",
+-    });
++    const windows = new GhidraProvider(
++      config,
++      silentLogger,
++      {},
++      {
++        ...host,
++        platform: "win32",
++      },
++    );
+     expect(windows.inspectTargetSupport(little).status).toBe("unsupported");
+   });
+ 
+diff --git a/src/ghidra/GhidraProvider.behavior.test.ts b/src/ghidra/GhidraProvider.behavior.test.ts
+index 7bbbc8c..43b4777 100644
+--- a/src/ghidra/GhidraProvider.behavior.test.ts
++++ b/src/ghidra/GhidraProvider.behavior.test.ts
+@@ -734,7 +734,7 @@ const sessionInfo = () => ({
+ 
+ const executableTarget = (
+   format: "mach-o" | "elf" | "pe",
+-  architecture: NonNullable<BinaryTarget["architecture"]>,
++  architecture: Extract<BinaryTarget, { format: "pe" }>["architecture"],
+ ): BinaryTarget =>
+   format === "pe"
+     ? peTarget(architecture)
+@@ -748,7 +748,7 @@ const executableTarget = (
+       };
+ 
+ const peTarget = (
+-  architecture: NonNullable<BinaryTarget["architecture"]>,
++  architecture: Extract<BinaryTarget, { format: "pe" }>["architecture"],
+ ): Extract<BinaryTarget, { format: "pe" }> => ({
+   path: "/tmp/fixture",
+   sha256: "a".repeat(64),
+diff --git a/src/hopper/HopperMachOImage.test.ts b/src/hopper/HopperMachOImage.test.ts
+index cb96a57..d503a05 100644
+--- a/src/hopper/HopperMachOImage.test.ts
++++ b/src/hopper/HopperMachOImage.test.ts
+@@ -35,3 +35,25 @@ it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+     }
+   },
+ );
++
++it("rejects an ELF target before attempting FAT64 source preparation", async () => {
++  const directory = await createTestTempDirectory("rea-hopper-mips-boundary-");
++  // No file is created: format validation must precede any filesystem lookup.
++  const path = join(directory, "mips.elf");
++  const result = await resolveHopperMachOImage({
++    path,
++    sha256: "0".repeat(64),
++    kind: "executable",
++    format: "elf",
++    architecture: "mips",
++    availableArchitectures: ["mips"],
++    mips: { elfClass: 32, byteOrder: "little", type: 2, flags: 0x70001001 },
++  });
++  if (result.ok)
++    throw new Error("An ELF target entered Mach-O image preparation");
++  expect(result.error).toMatchObject({
++    _tag: "BinaryTargetError",
++    path,
++    reason: "Hopper FAT64 image preparation requires a Mach-O target",
++  });
++});
+diff --git a/src/hopper/HopperMachOImage.ts b/src/hopper/HopperMachOImage.ts
+index b7e06df..451289d 100644
+--- a/src/hopper/HopperMachOImage.ts
++++ b/src/hopper/HopperMachOImage.ts
+@@ -44,6 +44,8 @@ export const resolveHopperMachOImage = async (
+       ),
+     );
+   if (signal?.aborted) return err(new AnalysisCancelledError("open_binary"));
++  if (target.format !== "mach-o")
++    return invalid("Hopper FAT64 image preparation requires a Mach-O target");
+   let file: FileHandle;
+   try {
+     file = await open(target.path, "r");
+diff --git a/src/application/MipsElfAbiFlags.test.ts b/tests/boundary/filesystem/mipsAbiFlags.test.ts
+similarity index 52%
+rename from src/application/MipsElfAbiFlags.test.ts
+rename to tests/boundary/filesystem/mipsAbiFlags.test.ts
+index 77cbba4..4423700 100644
+--- a/src/application/MipsElfAbiFlags.test.ts
++++ b/tests/boundary/filesystem/mipsAbiFlags.test.ts
+@@ -1,14 +1,17 @@
+ import assert from "node:assert/strict";
+-import { mkdtemp, open, rm, writeFile } from "node:fs/promises";
+-import { tmpdir } from "node:os";
++import { createHash } from "node:crypto";
++import { open, readFile, writeFile } from "node:fs/promises";
+ import { join } from "node:path";
+ import { it } from "vitest";
+-import type { MipsElfMetadata } from "../domain/binaryTargetTypes.js";
+-import { readMipsElfAbiFlags } from "./MipsElfAbiFlags.js";
++import { parseBinaryTarget } from "../../../src/application/BinaryTargetResolver.js";
++import { AnalysisCancelledError } from "../../../src/domain/analysisErrorCore.js";
++import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
++import type { MipsElfMetadata } from "../../../src/domain/binaryTargetTypes.js";
++import { readMipsElfAbiFlags } from "../../../src/application/MipsElfAbiFlags.js";
+ import {
+   ghidraMipsProfileParameters,
+   ghidraMipsUnsupportedReason,
+-} from "../ghidra/GhidraMipsProfile.js";
++} from "../../../src/ghidra/GhidraMipsProfile.js";
+ 
+ const metadata = (little = true): MipsElfMetadata => ({
+   elfClass: 32,
+@@ -21,9 +24,13 @@ const fixture = (little = true): Buffer => {
+   const bytes = Buffer.alloc(abiOffset + 48);
+   bytes.set([0x7f, 0x45, 0x4c, 0x46, 1, little ? 1 : 2, 1]);
+   const u16 = (value: number, offset: number) =>
+-    little ? bytes.writeUInt16LE(value, offset) : bytes.writeUInt16BE(value, offset);
++    little
++      ? bytes.writeUInt16LE(value, offset)
++      : bytes.writeUInt16BE(value, offset);
+   const u32 = (value: number, offset: number) =>
+-    little ? bytes.writeUInt32LE(value, offset) : bytes.writeUInt32BE(value, offset);
++    little
++      ? bytes.writeUInt32LE(value, offset)
++      : bytes.writeUInt32BE(value, offset);
+   u16(2, 16);
+   u16(8, 18);
+   u32(1, 20);
+@@ -50,18 +57,14 @@ const inspect = async (
+   little = true,
+   checkCancelled: () => void = () => {},
+ ) => {
+-  const directory = await mkdtemp(join(tmpdir(), "rea-mips-abi-test-"));
++  const directory = await createTestTempDirectory("rea-mips-abi-test-");
+   const path = join(directory, "fixture.elf");
++  await writeFile(path, bytes);
++  const handle = await open(path, "r");
+   try {
+-    await writeFile(path, bytes);
+-    const handle = await open(path, "r");
+-    try {
+-      return await readMipsElfAbiFlags(handle, metadata(little), checkCancelled);
+-    } finally {
+-      await handle.close();
+-    }
++    return await readMipsElfAbiFlags(handle, metadata(little), checkCancelled);
+   } finally {
+-    await rm(directory, { recursive: true, force: true });
++    await handle.close();
+   }
+ };
+ const target = (mips: MipsElfMetadata) => ({
+@@ -80,9 +83,17 @@ for (const little of [true, false]) {
+     const result = await inspect(bytes, little);
+     assert.ok(result.ok);
+     assert.deepEqual(result.value, {
+-      version: 0, isaLevel: 32, isaRevision: 2, gprSize: 1,
+-      cpr1Size: 1, cpr2Size: 0, fpAbi: 5, isaExtension: 0,
+-      ases: 0, flags1: 0, flags2: 0,
++      version: 0,
++      isaLevel: 32,
++      isaRevision: 2,
++      gprSize: 1,
++      cpr1Size: 1,
++      cpr2Size: 0,
++      fpAbi: 5,
++      isaExtension: 0,
++      ases: 0,
++      flags1: 0,
++      flags2: 0,
+     });
+     const resolved = target({ ...metadata(little), abiFlags: result.value });
+     assert.equal(ghidraMipsUnsupportedReason(resolved), null);
+@@ -120,8 +131,15 @@ it("keeps absent ABI declarations unknown and refuses provider admission", async
+   const result = await inspect(bytes);
+   assert.ok(result.ok);
+   assert.equal(result.value, null);
+-  assert.match(ghidraMipsUnsupportedReason(target({ ...metadata(), abiFlags: null })) ?? "", /inspected ABI/u);
+-  assert.match(ghidraMipsUnsupportedReason(target(metadata())) ?? "", /inspected ABI/u);
++  assert.match(
++    ghidraMipsUnsupportedReason(target({ ...metadata(), abiFlags: null })) ??
++      "",
++    /inspected ABI/u,
++  );
++  assert.match(
++    ghidraMipsUnsupportedReason(target(metadata())) ?? "",
++    /inspected ABI/u,
++  );
+ });
+ it("rejects contradictory program and section ABI declarations", async () => {
+   const bytes = fixture();
+@@ -162,12 +180,35 @@ for (const [name, change, reason] of malformed) {
+ }
+ const unsupported: [string, (bytes: Buffer) => void, RegExp][] = [
+   ["new record version", (b) => b.writeUInt16LE(1, abiOffset), /version 0/u],
+-  ["conflicting ISA", (b) => { b[abiOffset + 3] = 6; }, /MIPS32r2/u],
+-  ["soft-float", (b) => { b[abiOffset + 5] = 0; b[abiOffset + 7] = 3; }, /register modes/u],
+-  ["unspecified FP ABI", (b) => { b[abiOffset + 7] = 0; }, /unspecified/u],
++  [
++    "conflicting ISA",
++    (b) => {
++      b[abiOffset + 3] = 6;
++    },
++    /MIPS32r2/u,
++  ],
++  [
++    "soft-float",
++    (b) => {
++      b[abiOffset + 5] = 0;
++      b[abiOffset + 7] = 3;
++    },
++    /register modes/u,
++  ],
++  [
++    "unspecified FP ABI",
++    (b) => {
++      b[abiOffset + 7] = 0;
++    },
++    /unspecified/u,
++  ],
+   ["ISA extension", (b) => b.writeUInt32LE(1, abiOffset + 8), /extension/u],
+   ["ASE", (b) => b.writeUInt32LE(0x800, abiOffset + 12), /ASE/u],
+-  ["reserved flags", (b) => b.writeUInt32LE(2, abiOffset + 16), /general flags/u],
++  [
++    "reserved flags",
++    (b) => b.writeUInt32LE(2, abiOffset + 16),
++    /general flags/u,
++  ],
+ ];
+ for (const [name, change, reason] of unsupported) {
+   it(`retains ${name} while rejecting its unverified provider interpretation`, async () => {
+@@ -176,14 +217,93 @@ for (const [name, change, reason] of unsupported) {
+     const result = await inspect(bytes);
+     assert.ok(result.ok);
+     assert.ok(result.value !== null);
+-    assert.match(ghidraMipsUnsupportedReason(target({ ...metadata(), abiFlags: result.value })) ?? "", reason);
++    assert.match(
++      ghidraMipsUnsupportedReason(
++        target({ ...metadata(), abiFlags: result.value }),
++      ) ?? "",
++      reason,
++    );
+   });
+ }
+ it("preserves the caller's cancellation error during table inspection", async () => {
+   const cancelled = new Error("caller cancellation sentinel");
+   let checks = 0;
+-  await assert.rejects(inspect(fixture(), true, () => {
+-    checks += 1;
+-    if (checks === 12) throw cancelled;
+-  }), (error) => error === cancelled);
++  await assert.rejects(
++    inspect(fixture(), true, () => {
++      checks += 1;
++      if (checks === 12) throw cancelled;
++    }),
++    (error) => error === cancelled,
++  );
++});
++
++for (const little of [true, false]) {
++  it(`resolves full-file MIPS ABI identity before provider selection (${little ? "LE" : "BE"})`, async () => {
++    const directory = await createTestTempDirectory("rea-mips-resolution-");
++    const path = join(directory, "fixture.elf");
++    const bytes = fixture(little);
++    await writeFile(path, bytes);
++    const result = await parseBinaryTarget(path);
++    if (!result.ok) throw result.error;
++    assert.equal(result.value.architecture, "mips");
++    assert.equal(result.value.format, "elf");
++    assert.equal(
++      result.value.sha256,
++      createHash("sha256").update(bytes).digest("hex"),
++    );
++    if (
++      result.value.kind !== "executable" ||
++      result.value.architecture !== "mips"
++    )
++      throw new Error("Expected a resolved MIPS executable");
++    assert.equal(result.value.mips.byteOrder, little ? "little" : "big");
++    assert.equal(result.value.mips.abiFlags?.fpAbi, 5);
++    assert.equal(ghidraMipsUnsupportedReason(result.value), null);
++    assert.deepEqual(await readFile(path), bytes);
++  });
++}
++
++it("keeps missing ABI data unknown through the public target resolver", async () => {
++  const directory = await createTestTempDirectory("rea-mips-resolution-");
++  const path = join(directory, "fixture.elf");
++  const bytes = fixture();
++  bytes.writeUInt32LE(0, 52);
++  bytes.writeUInt32LE(0, 172);
++  await writeFile(path, bytes);
++  const result = await parseBinaryTarget(path);
++  if (!result.ok) throw result.error;
++  if (
++    result.value.kind !== "executable" ||
++    result.value.architecture !== "mips"
++  )
++    throw new Error("Expected a resolved MIPS executable");
++  assert.equal(result.value.mips.abiFlags, null);
++  assert.match(
++    ghidraMipsUnsupportedReason(result.value) ?? "",
++    /inspected ABI/u,
++  );
++});
++
++it("projects a malformed out-of-probe ABI record as a target error", async () => {
++  const directory = await createTestTempDirectory("rea-mips-resolution-");
++  const path = join(directory, "fixture.elf");
++  const bytes = fixture();
++  bytes.writeUInt32LE(0xfffffff0, 56);
++  await writeFile(path, bytes);
++  const result = await parseBinaryTarget(path);
++  if (result.ok) throw new Error("Malformed ABI extent was accepted");
++  assert.equal(result.error._tag, "BinaryTargetError");
++  assert.match(result.error.message, /ABI record lies outside the file/u);
++  assert.deepEqual(await readFile(path), bytes);
++});
++
++it("preserves cancellation instead of turning it into malformed target data", async () => {
++  const directory = await createTestTempDirectory("rea-mips-resolution-");
++  const path = join(directory, "fixture.elf");
++  await writeFile(path, fixture());
++  const controller = new AbortController();
++  controller.abort();
++  const result = await parseBinaryTarget(path, { signal: controller.signal });
++  if (result.ok) throw new Error("Cancelled target resolution succeeded");
++  assert.ok(result.error instanceof AnalysisCancelledError);
+ });
+diff --git a/tests/composition/analysis-sessions/mips-identity.test.ts b/tests/composition/analysis-sessions/mips-identity.test.ts
+index 2dcafc8..cf6c52f 100644
+--- a/tests/composition/analysis-sessions/mips-identity.test.ts
++++ b/tests/composition/analysis-sessions/mips-identity.test.ts
+@@ -1,10 +1,7 @@
+ import { describe, expect, it } from "vitest";
+ import type { BinaryTarget } from "../../../src/domain/binaryTargetTypes.js";
+ import { createAnalysisProfile } from "../../../src/domain/analysisProfile.js";
+-import {
+-  createEvidence,
+-  parseEvidence,
+-} from "../../../src/domain/evidence.js";
++import { createEvidence, parseEvidence } from "../../../src/domain/evidence.js";
+ import { createEvidenceBundle } from "../../../src/domain/evidenceBundle.js";
+ import {
+   createAnalysisSnapshotEntry,
+@@ -82,7 +79,12 @@ describe("MIPS identity through lifecycle, Evidence and snapshot consumers", ()
+       }),
+     ).toThrow("semantic identifier");
+     const changed = createAnalysisProfile(provider, {
+-      mips_elf: { elf_class: 32, byte_order: "big", type: 2, flags: 0x70001001 },
++      mips_elf: {
++        elf_class: 32,
++        byte_order: "big",
++        type: 2,
++        flags: 0x70001001,
++      },
+     });
+     expect(snapshotMatchesProfile(binding, changed)).toBe(false);
+   });
