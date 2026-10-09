@@ -29,6 +29,9 @@ if (process.env.GHIDRA_INSTALL_DIR === undefined)
 const installation = inspectGhidraInstallation({
   environment: process.env,
   installDir: process.env.GHIDRA_INSTALL_DIR,
+  ...(process.env.JAVA_HOME === undefined
+    ? {}
+    : { javaHome: process.env.JAVA_HOME }),
 });
 if (installation.status !== "available")
   throw new Error(
