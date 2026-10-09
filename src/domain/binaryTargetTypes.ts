@@ -14,6 +14,23 @@ export interface MipsElfMetadata {
   readonly byteOrder: "little" | "big";
   readonly type: number;
   readonly flags: number;
+  /** Undefined until inspected; null means neither typed table has a record. */
+  readonly abiFlags?: MipsAbiFlags | null;
+}
+
+/** Declared fields of the 24-byte MIPS ABI flags record, not inferred semantics. */
+export interface MipsAbiFlags {
+  readonly version: number;
+  readonly isaLevel: number;
+  readonly isaRevision: number;
+  readonly gprSize: number;
+  readonly cpr1Size: number;
+  readonly cpr2Size: number;
+  readonly fpAbi: number;
+  readonly isaExtension: number;
+  readonly ases: number;
+  readonly flags1: number;
+  readonly flags2: number;
 }
 
 interface BinaryTargetIdentity {

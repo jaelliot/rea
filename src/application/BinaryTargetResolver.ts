@@ -13,6 +13,7 @@ import { BinaryTargetError } from "../domain/configurationErrors.js";
 import { AnalysisCancelledError } from "../domain/analysisErrorCore.js";
 import type { BinaryTarget } from "../domain/binaryTargetTypes.js";
 import { err, ok, type Result } from "../domain/result.js";
+import { readMipsElfAbiFlags } from "./MipsElfAbiFlags.js";
 import {
   resolveAppBundleExecutable,
   type ResolvedAppBundle,
@@ -331,7 +332,23 @@ const readExecutableMetadata = async (
       }
     }
   }
-  return parseExecutableHeader(bytes, hostArchitecture, fileSize);
+  const parsed = parseExecutableHeader(bytes, hostArchitecture, fileSize);
+  if (
+    !parsed.ok ||
+    parsed.value.architecture !== "mips" ||
+    parsed.value.mips.elfClass !== 32
+  )
+    return parsed;
+  const abiFlags = await readMipsElfAbiFlags(
+    handle,
+    parsed.value.mips,
+    () => throwIfTargetResolutionCancelled(signal),
+  );
+  if (!abiFlags.ok) return abiFlags;
+  return ok({
+    ...parsed.value,
+    mips: { ...parsed.value.mips, abiFlags: abiFlags.value },
+  });
 };
 
 const readPeMetadata = async (

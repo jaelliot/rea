@@ -9,9 +9,9 @@ PSP/Allegrex remains a separate specialization tracked in
 ## Admission boundary
 
 ELF `EM_MIPS` is retained as the provider-neutral `mips` family. The target also
-retains class, byte order, `e_type`, and raw `e_flags`. Recognition does not mean
-every provider or MIPS variant is supported. Existing PE, managed and Mach-O
-architecture sets are unchanged.
+retains class, byte order, `e_type`, raw `e_flags`, and inspected ABI declarations.
+Recognition does not mean every provider or MIPS variant is supported. Existing
+PE, managed and Mach-O architecture sets are unchanged.
 
 The first Ghidra lane admits ELF32 `ET_EXEC`, little or big endian, with explicit
 o32 and `EF_MIPS_ARCH_32R2` flags and no machine-specific or ASE encoding flags.
@@ -21,16 +21,30 @@ variants, shared/relocatable objects and PSP PRX are not covered by this lane.
 Their family may be identified, but provider selection returns the specific
 unsupported constraint rather than guessing a compatible profile.
 
-Explicit `EF_MIPS_FP64` and `EF_MIPS_NAN2008` declarations are also refused:
-the integer-only fixture does not establish those floating-point semantics.
-Their absence is not a complete floating-point ABI check; toolchains can carry
-additional ABI information in `.MIPS.abiflags`. This lane does not yet inspect
-that section or claim floating-point conformance.
+Explicit `EF_MIPS_FP64` and `EF_MIPS_NAN2008` declarations are refused. Their
+absence is insufficient: Clang can emit identical `e_flags` for FP32, FP64 and
+soft-float targets. Target resolution also reads the 24-byte ABI flags record
+identified by `PT_MIPS_ABIFLAGS` and/or `SHT_MIPS_ABIFLAGS`, without relying on
+section names or the record being inside the initial 4 KiB header probe.
+Program and section declarations must agree; duplicate, conflicting, truncated
+or out-of-file records are rejected. Stripped section tables and section-only
+records are supported. Extended table numbering is explicitly unsupported.
+The field layout follows
+[`Elf_MIPS_ABIFlags_v0`](https://github.com/bminor/glibc/blob/master/elf/elf.h).
 
-MIPS facts are committed in the analysis profile so interpretation changes
-invalidate profile-bound snapshots. Evidence, lifecycle outputs and saved
-snapshots preserve the `mips` family. Hopper and IDA adapters do not implicitly
-gain MIPS support. Windows Ghidra P0 remains PE x86/x86-64 only.
+Provider admission requires record version 0, MIPS32r2, 32-bit GPR/CPR1, no CPR2,
+and a double-precision or FPXX ABI declaration with no ISA extension, ASE or
+unknown general flags. Missing records remain unknown rather than defaulting
+to a compatible ABI, and this initial lane refuses them. Unknown record values
+are retained for diagnosis but do not gain provider support. These checks bind
+the declared interpretation; the integer-only fixture does not establish full
+floating-point behavioral conformance.
+
+MIPS header and ABI record facts are committed in the analysis profile so
+interpretation changes invalidate profile-bound snapshots. The support-lane
+identity is versioned independently of file identity. Evidence, lifecycle
+outputs and saved snapshots preserve the `mips` family. Hopper and IDA adapters
+do not implicitly gain MIPS support. Windows Ghidra P0 remains PE x86/x86-64 only.
 
 ## Use
 

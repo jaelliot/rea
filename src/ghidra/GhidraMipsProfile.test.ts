@@ -40,6 +40,19 @@ const target = (change: Partial<MipsElfMetadata> = {}): BinaryTarget => ({
     byteOrder: "little",
     type: 2,
     flags: 0x70001001,
+    abiFlags: {
+      version: 0,
+      isaLevel: 32,
+      isaRevision: 2,
+      gprSize: 1,
+      cpr1Size: 1,
+      cpr2Size: 0,
+      fpAbi: 5,
+      isaExtension: 0,
+      ases: 0,
+      flags1: 0,
+      flags2: 0,
+    },
     ...change,
   },
 });
@@ -60,6 +73,19 @@ describe("bounded Ghidra MIPS admission", () => {
       byte_order: "little",
       type: 2,
       flags: 0x70001001,
+      abi_flags: {
+        version: 0,
+        isa_level: 32,
+        isa_revision: 2,
+        gpr_size: 1,
+        cpr1_size: 1,
+        cpr2_size: 0,
+        fp_abi: 5,
+        isa_extension: 0,
+        ases: 0,
+        flags1: 0,
+        flags2: 0,
+      },
     });
     expect(left.value.profile?.digest).not.toBe(right.value.profile?.digest);
     const windows = new GhidraProvider(config, silentLogger, {}, {
@@ -86,6 +112,7 @@ describe("bounded Ghidra MIPS admission", () => {
     [{ flags: 0x60001001 }, "32R2"],
     [{ flags: 0x70001201 }, "EF_MIPS_FP64"],
     [{ flags: 0x70001401 }, "EF_MIPS_NAN2008"],
+    [{ abiFlags: null }, "inspected ABI"],
   ] satisfies [Partial<MipsElfMetadata>, string][])(
     "refuses an unverified MIPS interpretation %j",
     async (change, reason) => {
