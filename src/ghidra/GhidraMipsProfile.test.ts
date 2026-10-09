@@ -88,10 +88,15 @@ describe("bounded Ghidra MIPS admission", () => {
       },
     });
     expect(left.value.profile?.digest).not.toBe(right.value.profile?.digest);
-    const windows = new GhidraProvider(config, silentLogger, {}, {
-      ...host,
-      platform: "win32",
-    });
+    const windows = new GhidraProvider(
+      config,
+      silentLogger,
+      {},
+      {
+        ...host,
+        platform: "win32",
+      },
+    );
     expect(windows.inspectTargetSupport(little).status).toBe("unsupported");
   });
 

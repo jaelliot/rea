@@ -339,10 +339,8 @@ const readExecutableMetadata = async (
     parsed.value.mips.elfClass !== 32
   )
     return parsed;
-  const abiFlags = await readMipsElfAbiFlags(
-    handle,
-    parsed.value.mips,
-    () => throwIfTargetResolutionCancelled(signal),
+  const abiFlags = await readMipsElfAbiFlags(handle, parsed.value.mips, () =>
+    throwIfTargetResolutionCancelled(signal),
   );
   if (!abiFlags.ok) return abiFlags;
   return ok({

@@ -1,10 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { BinaryTarget } from "../../../src/domain/binaryTargetTypes.js";
 import { createAnalysisProfile } from "../../../src/domain/analysisProfile.js";
-import {
-  createEvidence,
-  parseEvidence,
-} from "../../../src/domain/evidence.js";
+import { createEvidence, parseEvidence } from "../../../src/domain/evidence.js";
 import { createEvidenceBundle } from "../../../src/domain/evidenceBundle.js";
 import {
   createAnalysisSnapshotEntry,
@@ -82,7 +79,12 @@ describe("MIPS identity through lifecycle, Evidence and snapshot consumers", () 
       }),
     ).toThrow("semantic identifier");
     const changed = createAnalysisProfile(provider, {
-      mips_elf: { elf_class: 32, byte_order: "big", type: 2, flags: 0x70001001 },
+      mips_elf: {
+        elf_class: 32,
+        byte_order: "big",
+        type: 2,
+        flags: 0x70001001,
+      },
     });
     expect(snapshotMatchesProfile(binding, changed)).toBe(false);
   });

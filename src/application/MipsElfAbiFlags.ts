@@ -45,8 +45,7 @@ export const readMipsElfAbiFlags = async (
         offset + total,
       );
       checkCancelled();
-      if (observed.bytesRead === 0)
-        return err(`truncated MIPS ${label}`);
+      if (observed.bytesRead === 0) return err(`truncated MIPS ${label}`);
       total += observed.bytesRead;
     }
     return ok(bytes);

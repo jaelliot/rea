@@ -201,8 +201,11 @@ if (
     { cause: primaryFailure },
   );
 if (primaryFailure !== undefined)
-  throw new Error(`MIPS verification failed; retained workspace: ${workspace}`, {
-    cause: primaryFailure,
-  });
+  throw new Error(
+    `MIPS verification failed; retained workspace: ${workspace}`,
+    {
+      cause: primaryFailure,
+    },
+  );
 await rm(workspace, { recursive: true, force: true });
 console.log(JSON.stringify({ ...completed, fixtures: reports }, null, 2));

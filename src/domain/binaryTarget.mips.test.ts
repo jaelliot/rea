@@ -3,9 +3,7 @@ import { parseExecutableHeader } from "./binaryTarget.js";
 
 const header = (little: boolean, bits: 32 | 64 = 32): Buffer => {
   const bytes = Buffer.alloc(bits === 32 ? 52 : 64);
-  bytes.set([
-    0x7f, 0x45, 0x4c, 0x46, bits === 32 ? 1 : 2, little ? 1 : 2, 1,
-  ]);
+  bytes.set([0x7f, 0x45, 0x4c, 0x46, bits === 32 ? 1 : 2, little ? 1 : 2, 1]);
   if (little) {
     bytes.writeUInt16LE(2, 16);
     bytes.writeUInt16LE(8, 18);

@@ -69,9 +69,7 @@ LLD, Ghidra and its compatible JDK; ordinary host-native checks do not acquire
 these tools. `REA_MIPS_CLANG` can select the Clang executable.
 
 ```bash
-npm run build:cached
-GHIDRA_INSTALL_DIR=/absolute/path/to/ghidra \
-  node scripts/verify-real-ghidra-mips.mjs
+GHIDRA_INSTALL_DIR=/absolute/path/to/ghidra npm run verify:ghidra:mips
 ```
 
 The lane compiles both byte orders, never executes the targets, checks real
