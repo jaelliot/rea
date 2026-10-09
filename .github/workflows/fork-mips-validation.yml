@@ -1,0 +1,74 @@
+name: Fork MIPS validation workspace
+
+on:
+  push:
+    branches: [ci/mips-validation]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fork-mips-validation
+  cancel-in-progress: true
+
+env:
+  HUSKY: "0"
+  TURBO_TELEMETRY_DISABLED: "1"
+
+jobs:
+  validate:
+    if: github.repository == 'jaelliot/rea'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: e064d8473f80695332c81aa66a8bafd667e1db6d
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Install locked dependencies
+        run: |
+          node --version
+          npm --version
+          npm ci
+      - name: Preserve exact source and toolchain for offline verification
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/mips-validation"
+          git rev-parse HEAD > "$RUNNER_TEMP/mips-validation/source-sha.txt"
+          git archive --format=tar.gz --output="$RUNNER_TEMP/mips-validation/source.tar.gz" HEAD
+          tar -czf "$RUNNER_TEMP/mips-validation/dependencies.tar.gz" node_modules
+          NODE_ROOT="$(dirname "$(dirname "$(command -v node)")")"
+          tar -C "$NODE_ROOT" -czf "$RUNNER_TEMP/mips-validation/node-toolchain.tar.gz" bin/node lib/node_modules/npm
+          sha256sum "$RUNNER_TEMP/mips-validation/"*.tar.gz > "$RUNNER_TEMP/mips-validation/archive-sha256.txt"
+      - name: Obtain the pinned formatter patch without changing the branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'JS'
+          import { execFileSync } from 'node:child_process';
+          const paths = execFileSync('git', ['diff', '--name-only', '--diff-filter=ACM', '1ac8389c5c1f75faf8d7f2f3faf2f24febad5fea..HEAD', '-z'], { encoding: 'utf8' }).split('\0').filter(p => /\.(?:ts|mjs|md)$/.test(p));
+          execFileSync('./node_modules/.bin/oxfmt', ['--write', ...paths], { stdio: 'inherit' });
+          JS
+          git diff --binary > "$RUNNER_TEMP/mips-validation/formatter.patch"
+          git diff --stat
+      - name: Project typecheck (diagnostic)
+        continue-on-error: true
+        run: npm run typecheck
+      - name: Actual focused source tests (diagnostic)
+        continue-on-error: true
+        run: npm run test:local -- src/domain/binaryTarget.mips.test.ts src/application/MipsElfAbiFlags.test.ts src/ghidra/GhidraMipsProfile.test.ts tests/composition/analysis-sessions/mips-identity.test.ts
+      - name: Upload reproducible validation workspace
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: mips-validation-e064d84
+          path: ${{ runner.temp }}/mips-validation/
+          if-no-files-found: error
+          retention-days: 3
+          compression-level: 0
