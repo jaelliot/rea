@@ -34,7 +34,7 @@ For this experiment the extension must be installed under
 `$GHIDRA_INSTALL_DIR/Ghidra/Extensions/ghidra-allegrex`. REA isolates its analysis
 home, so installation in the operator's home is not assumed to be visible. The
 verifier records extension metadata, language-definition and JAR digests; a
-missing installation produces `PSP_EXTENSION_UNAVAILABLE`, Presence is only a
+missing installation produces `PSP_EXTENSION_UNAVAILABLE`. Presence is only a
 preflight, not proof of compatibility: the real handshake and operations must
 also pass.
 
