@@ -358,7 +358,7 @@ describe.skipIf(process.platform === "win32")(
       async (field, value) => {
         const { provider, root } = await installation();
         await rename(root, `${root}-unavailable`);
-        const altered: BinaryTarget = {
+        const altered: Extract<BinaryTarget, { architecture: "mips" }> = {
           ...target,
           mips: {
             elfClass: 32,
@@ -386,7 +386,7 @@ describe.skipIf(process.platform === "win32")(
       async (abiFlags) => {
         const { provider, root } = await installation();
         await rename(root, `${root}-unavailable`);
-        const altered: BinaryTarget = {
+        const altered: Extract<BinaryTarget, { architecture: "mips" }> = {
           ...target,
           mips: {
             elfClass: 32,
