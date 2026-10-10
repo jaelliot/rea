@@ -1,0 +1,186 @@
+name: Fork PSP ABI final verification
+
+on:
+  push:
+    branches: [ci/psp-public-validation]
+    paths: [.github/workflows/fork-psp-abi-finalize.yml]
+
+permissions:
+  contents: write
+
+env:
+  HUSKY: "0"
+  TURBO_TELEMETRY_DISABLED: "1"
+  SOURCE_SHA: e52576acc64a98f70cf8069e58b5a22a388fc968
+
+jobs:
+  verify:
+    if: github.repository == 'jaelliot/rea'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: e52576acc64a98f70cf8069e58b5a22a388fc968
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Complete scoped test structure and actual snapshot-profile assertion
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          mkdir -p "$RUNNER_TEMP/psp-results" "$RUNNER_TEMP/psp-runtime"
+          python - <<'PY'
+          from pathlib import Path
+          def replace(path, old, new):
+              p = Path(path)
+              s = p.read_text()
+              assert s.count(old) == 1, (path, old)
+              p.write_text(s.replace(old, new))
+          path = 'tests/boundary/filesystem/ghidraPspExtension.test.ts'
+          for title, group in [
+              ('retains independently inspected PSP ABI bytes through the real target reader', 'PSP inspected ABI declaration boundary'),
+              ('forces the PSP loader/language only for the selected profile', 'PSP explicit loader boundary'),
+          ]:
+              old = '    it("' + title + '"'
+              new = '  },\n);\n\ndescribe.skipIf(process.platform === "win32")(\n  "' + group + '",\n  () => {\n' + old
+              replace(path, old, new)
+          path = 'scripts/verify-real-ghidra-mips.mjs'
+          replace(path, '''      assert.deepEqual(
+                  snapshot.target.mips,
+                  independent.mips,
+                  "Snapshot did not retain the independently inspected target ABI",
+                );
+                assert.equal(
+                  snapshot.binding.analysis_profile.parameters.mips_elf.byte_order,
+                  byteOrder,
+                );''', '''      const abi = independent.mips.abiFlags;
+                assert.deepEqual(
+                  snapshot.binding.analysis_profile.parameters.mips_elf,
+                  {
+                    elf_class: independent.mips.elfClass,
+                    byte_order: independent.mips.byteOrder,
+                    type: independent.mips.type,
+                    flags: independent.mips.flags,
+                    abi_flags: {
+                      version: abi.version,
+                      isa_level: abi.isaLevel,
+                      isa_revision: abi.isaRevision,
+                      gpr_size: abi.gprSize,
+                      cpr1_size: abi.cpr1Size,
+                      cpr2_size: abi.cpr2Size,
+                      fp_abi: abi.fpAbi,
+                      isa_extension: abi.isaExtension,
+                      ases: abi.ases,
+                      flags1: abi.flags1,
+                      flags2: abi.flags2,
+                    },
+                  },
+                  "Snapshot profile did not retain the independently inspected ELF/ABI declaration",
+                );''')
+          PY
+          npm ci
+          npm exec oxfmt -- --write tests/boundary/filesystem/ghidraPspExtension.test.ts scripts/verify-real-ghidra-mips.mjs
+          node --check scripts/verify-real-ghidra-mips.mjs
+          git diff --check
+          git add -- tests/boundary/filesystem/ghidraPspExtension.test.ts scripts/verify-real-ghidra-mips.mjs
+          git diff --cached > "$RUNNER_TEMP/psp-results/finalize.patch"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'test(ghidra): bind PSP ABI verification to snapshot profiles'
+          git rev-parse HEAD | tee "$RUNNER_TEMP/psp-results/source-sha.txt"
+      - name: Advance only isolated candidate with expected-head check
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$(git ls-remote --heads origin fix/psp-abi-record-validation | cut -f1)" = "$SOURCE_SHA"
+          git -c credential.helper='!gh auth git-credential' push origin HEAD:refs/heads/fix/psp-abi-record-validation
+      - name: Build and existing static gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run build:cached 2>&1 | tee "$RUNNER_TEMP/psp-results/build.log"
+          npm run check:ci 2>&1 | tee "$RUNNER_TEMP/psp-results/check-ci.log"
+      - name: Actual affected suites and documentation gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run test:focused -- tests/boundary/filesystem/ghidraPspExtension.test.ts tests/conformance/ghidra/psp-checks.test.ts tests/boundary/providers/ghidra/ghidraLauncher.test.ts src/domain/binaryTarget.mips.test.ts src/ghidra/GhidraMipsProfile.test.ts src/ghidra/GhidraProvider.behavior.test.ts src/hopper/HopperMachOImage.test.ts tests/boundary/filesystem/mipsAbiFlags.test.ts tests/composition/analysis-sessions/mips-identity.test.ts tests/conformance/ghidra/mips-checks.test.ts 2>&1 | tee "$RUNNER_TEMP/psp-results/focused.log"
+          npm run verify:test-discovery 2>&1 | tee "$RUNNER_TEMP/psp-results/discovery.log"
+          npm run docs:check 2>&1 | tee "$RUNNER_TEMP/psp-results/docs.log"
+      - name: Provision checksum-pinned verification tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${JAVA_HOME_21_X64:-}"
+          echo "JAVA_HOME=$JAVA_HOME_21_X64" >> "$GITHUB_ENV"
+          "$JAVA_HOME_21_X64/bin/java" -version 2>&1 | tee "$RUNNER_TEMP/psp-results/java.txt"
+          sudo apt-get update -qq
+          sudo apt-get install --no-install-recommends -y clang-18 lld-18 binutils libgmp10 libmpfr6 libmpc3 libreadline-dev libusb-dev
+          echo 'REA_MIPS_CLANG=clang-18' >> "$GITHUB_ENV"
+          echo '/usr/lib/llvm-18/bin' >> "$GITHUB_PATH"
+          curl --fail --location --retry 2 --max-time 180 'https://github.com/NationalSecurityAgency/ghidra/releases/download/Ghidra_12.1.3_build/ghidra_12.1.3_PUBLIC_20260817.zip' -o "$RUNNER_TEMP/psp-ghidra.zip"
+          echo "93a5d11a9ad510622acaaf908c556a7b9b764d338e78a7567f3689bf5081fd54  $RUNNER_TEMP/psp-ghidra.zip" | sha256sum --check
+          unzip -q "$RUNNER_TEMP/psp-ghidra.zip" -d "$RUNNER_TEMP/psp-ghidra"
+          GHIDRA_DIR="$RUNNER_TEMP/psp-ghidra/ghidra_12.1.3_PUBLIC"
+          test -x "$GHIDRA_DIR/support/analyzeHeadless"
+          echo "GHIDRA_INSTALL_DIR=$GHIDRA_DIR" >> "$GITHUB_ENV"
+          curl --fail --location --retry 2 --max-time 180 'https://github.com/pspdev/pspdev/releases/download/v20261001/pspdev-ubuntu-latest-x86_64.tar.gz' -o "$RUNNER_TEMP/pspdev.tar.gz"
+          echo "a86efe624e770005290919617859e9df24bd8fcd3e364f4587f23ec7364b0acd  $RUNNER_TEMP/pspdev.tar.gz" | sha256sum --check
+          mkdir -p "$RUNNER_TEMP/psp-tools"
+          tar -xzf "$RUNNER_TEMP/pspdev.tar.gz" -C "$RUNNER_TEMP/psp-tools"
+          PSPDEV_DIR="$RUNNER_TEMP/psp-tools/pspdev"
+          test -x "$PSPDEV_DIR/bin/psp-gcc"
+          echo "PSPDEV=$PSPDEV_DIR" >> "$GITHUB_ENV"
+          echo "$PSPDEV_DIR/bin" >> "$GITHUB_PATH"
+          echo "TMPDIR=$RUNNER_TEMP/psp-runtime" >> "$GITHUB_ENV"
+          curl --fail --location --retry 2 --max-time 90 'https://github.com/kotcrab/ghidra-allegrex/releases/download/v21.4/ghidra_12.1.3_PUBLIC_20260825_ghidra-allegrex.zip' -o "$RUNNER_TEMP/allegrex.zip"
+          echo "62e829fa9e6ed6f2bd343763fb339a3f8812b02a4e0ed5a9409b14007b408243  $RUNNER_TEMP/allegrex.zip" | sha256sum --check
+          sha256sum "$RUNNER_TEMP/psp-ghidra.zip" "$RUNNER_TEMP/pspdev.tar.gz" "$RUNNER_TEMP/allegrex.zip" > "$RUNNER_TEMP/psp-results/tool-archives.sha256"
+      - name: Public missing-extension refusals
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/verify-real-ghidra-mips.mjs --psp-missing-extension 2>&1 | tee "$RUNNER_TEMP/psp-results/missing-extension.log"
+      - name: Install extension in disposable Ghidra
+        id: extension_install
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$GHIDRA_INSTALL_DIR/Ghidra/Extensions"
+          unzip -q "$RUNNER_TEMP/allegrex.zip" -d "$GHIDRA_INSTALL_DIR/Ghidra/Extensions"
+          test -f "$GHIDRA_INSTALL_DIR/Ghidra/Extensions/ghidra-allegrex/extension.properties"
+      - name: Real public PSP analysis and snapshot A-B-A identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/verify-real-ghidra-mips.mjs --psp 2>&1 | tee "$RUNNER_TEMP/psp-results/psp-public.log"
+      - name: Real generic LE and BE MIPS retain separate profiles
+        if: ${{ !cancelled() && steps.extension_install.outcome == 'success' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/verify-real-ghidra-mips.mjs 2>&1 | tee "$RUNNER_TEMP/psp-results/generic-mips.log"
+      - name: Preserve diagnostics and check clean source
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/psp-results/logs"
+          git status --short > "$RUNNER_TEMP/psp-results/git-status.txt"
+          git rev-parse HEAD > "$RUNNER_TEMP/psp-results/final-source-sha.txt"
+          if test -d "$RUNNER_TEMP/psp-runtime"; then
+            find "$RUNNER_TEMP/psp-runtime" -type f -name '*.log' -size -2M -exec cp --parents '{}' "$RUNNER_TEMP/psp-results/logs/" \;
+          fi
+          git diff --exit-code
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: psp-abi-final-verification
+          path: ${{ runner.temp }}/psp-results/
+          if-no-files-found: error
+          retention-days: 3
