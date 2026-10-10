@@ -34,7 +34,7 @@ const pspAbiFlags: MipsAbiFlags = {
   flags1: 1,
   flags2: 0,
 };
-const target: BinaryTarget = {
+const target = {
   kind: "executable",
   format: "elf",
   architecture: "mips",
@@ -48,7 +48,7 @@ const target: BinaryTarget = {
     flags: 0x10a23001,
     abiFlags: pspAbiFlags,
   },
-};
+} satisfies BinaryTarget;
 const host: GhidraInstallationHost = {
   platform: "linux",
   architecture: "x64",
