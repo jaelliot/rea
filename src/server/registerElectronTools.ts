@@ -18,6 +18,7 @@ import {
   listElectronTargets,
 } from "../application/javascript/ElectronObservationService.js";
 import { analyzeJavaScriptApplicationValidated } from "../application/javascript/JavaScriptApplicationService.js";
+import type { ArtifactResourceScope } from "../artifacts/ArtifactResourceScope.js";
 import { reconcileJavaScriptRuntimeEvidenceValidated } from "../application/javascript/JavaScriptRuntimeReconciliationService.js";
 import type { ProgressReporter } from "../application/ProgressReporter.js";
 import { toolContract } from "../contracts/toolContracts.js";
@@ -30,8 +31,11 @@ import type { Logger } from "pino";
 import { mcpProgressReporter } from "./mcpProgress.js";
 import { logToolExecution } from "./toolLogging.js";
 import { toolRegistrationOptions } from "./toolRegistrationOptions.js";
+import type { WithAdmittedAnalysis } from "./analysisAdmission.js";
+import { runAdmittedToolOperation } from "./admittedToolOperation.js";
 
 interface ElectronToolRegistration {
+  readonly artifactResources: ArtifactResourceScope;
   readonly logger: Logger;
   readonly observationLoadFailure?: OptionalProviderLoadFailure | undefined;
   readonly activeLoadFailure?: OptionalProviderLoadFailure | undefined;
@@ -39,6 +43,7 @@ interface ElectronToolRegistration {
   readonly electronActive: ElectronActiveObservationPort | undefined;
   readonly recordEvidence: EvidenceWriter["recordEvidence"] | undefined;
   readonly evidenceById: EvidenceLookup | undefined;
+  readonly withAdmittedAnalysis?: WithAdmittedAnalysis;
 }
 
 interface ElectronToolContext {
@@ -52,7 +57,7 @@ export const registerElectronTools = (
   server: EvidenceMcpServer,
   options: ElectronToolRegistration,
 ): void => {
-  const registration = { ...options, delivery: server.delivery };
+  const registration = { ...options, delivery: server.delivery, server };
   const listContract = toolContract("list_electron_targets");
   const inspectContract = toolContract("inspect_electron_page");
   const analyzeContract = toolContract("analyze_javascript_application");
@@ -101,6 +106,7 @@ export const registerElectronTools = (
         async ({ detail, ...request }, { signal, progress }) => {
           const analyzed = await analyzeJavaScriptApplicationValidated(
             request,
+            options.artifactResources,
             { signal, progress },
           );
           return detail === "summary" && analyzed.ok
@@ -139,7 +145,10 @@ export const registerElectronTools = (
 };
 
 const runElectronTool = async <Input>(
-  options: ElectronToolRegistration & { readonly delivery: ToolResultDelivery },
+  options: ElectronToolRegistration & {
+    readonly delivery: ToolResultDelivery;
+    readonly server: EvidenceMcpServer;
+  },
   contract: ToolContract,
   request: {
     readonly input: Input;
@@ -163,17 +172,26 @@ const runElectronTool = async <Input>(
       err(optionalProviderUnavailable(failure, contract.name)),
       contract,
     );
-  const result = await logToolExecution(options.logger, contract.name, () =>
-    execute(input, {
-      signal: context.mcpReq.signal,
-      progress: mcpProgressReporter(context),
-    }),
-  );
-  if (!result.ok) return options.delivery.toCallToolResult(result, contract);
-  const recorded = options.recordEvidence?.(result.value);
-  return options.delivery.toEvidenceToolResult(
-    result.value,
-    contract,
-    recorded,
+  return runAdmittedToolOperation(
+    options.server,
+    options.withAdmittedAnalysis,
+    contract.name,
+    context.mcpReq.signal,
+    async () => {
+      const result = await logToolExecution(options.logger, contract.name, () =>
+        execute(input, {
+          signal: context.mcpReq.signal,
+          progress: mcpProgressReporter(context),
+        }),
+      );
+      if (!result.ok)
+        return options.delivery.toCallToolResult(result, contract);
+      const recorded = options.recordEvidence?.(result.value);
+      return options.delivery.toEvidenceToolResult(
+        result.value,
+        contract,
+        recorded,
+      );
+    },
   );
 };

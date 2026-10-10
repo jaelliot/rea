@@ -56,6 +56,7 @@ import { JavaScriptRecoveryService } from "../application/javascript/JavaScriptR
 import type { JavaScriptRecoveryPort } from "../application/javascript/JavaScriptRecoveryPort.js";
 import { createJavaScriptRecoveryProvider } from "../composition/javascriptRecovery.js";
 import { registerElectronTools } from "./registerElectronTools.js";
+import { ArtifactResourceScope } from "../artifacts/ArtifactResourceScope.js";
 import { registerEnhancedTools } from "./registerEnhancedTools.js";
 import { registerJavaScriptRuntimeObservationTools } from "./registerJavaScriptRuntimeObservationTools.js";
 import { registerManagedTools } from "./registerManagedTools.js";
@@ -204,7 +205,24 @@ export const createServer = (
   const analysis = source.kind === "session" ? source.session : source.analysis;
   const environment = snapshotEnvironment(options.environment ?? process.env);
   const delivery = selectToolResultDelivery(environment, options.delivery);
-  const selectedOptions = { ...options, environment, delivery };
+  const evmInterface =
+    options.evmInterface ?? createEvmInterfaceService(environment);
+  const webSourceLocation =
+    options.webSourceLocation ?? createWebSourceLocationService(environment);
+  const javascriptRecovery =
+    options.javascriptRecovery ?? createJavaScriptRecoveryProvider(environment);
+  const artifactResources = new ArtifactResourceScope();
+  const firmwareAnalysis = new FirmwareAnalysisService(
+    options.firmwareAnalysis ?? createFirmwareAnalysisProvider(environment),
+  );
+  const selectedOptions = {
+    ...options,
+    environment,
+    delivery,
+    evmInterface,
+    webSourceLocation,
+    javascriptRecovery,
+  };
   const startedAt = new Date().toISOString();
   const logger = options.logger ?? silentLogger;
   const server = createMcpServer(
@@ -220,9 +238,36 @@ export const createServer = (
   const jeb = options.jebAnalysis ?? createJebAnalysisProvider(environment);
   const adbDevice =
     options.adbDeviceAnalysis ?? createAdbDeviceAnalysisProvider(environment);
+  let providerClose: Promise<void> | undefined;
+  const closeProviders = (): Promise<void> => {
+    providerClose ??= Promise.allSettled([
+      android.close(),
+      apktool.close(),
+      jeb.close(),
+      adbDevice.close(),
+      evmInterface.close(),
+      webSourceLocation.close(),
+      javascriptRecovery.close?.() ?? Promise.resolve(),
+      artifactResources.close(),
+      firmwareAnalysis.close(),
+      options.browserScenarioCapture?.close?.() ?? Promise.resolve(),
+    ])
+      .then((results) => {
+        const failures = results.flatMap((result) =>
+          result.status === "rejected" ? [result.reason] : [],
+        );
+        if (failures.length > 0)
+          throw new AggregateError(failures, "REA provider cleanup failed");
+      })
+      .catch((cause: unknown) => {
+        providerClose = undefined;
+        throw cause;
+      });
+    return providerClose;
+  };
   const availability = installSessionToolAvailability(
     session,
-    selectedOptions,
+    options,
     environment,
   );
   const toolLogger = logger.child({ layer: "server" });
@@ -232,6 +277,7 @@ export const createServer = (
     recordEvidence,
     recordEvidenceWithUnknown,
   } = createSessionRecorders(server, session);
+  const analysisAdmission = withAdmittedAnalysis(source);
   const toolContext: ServerToolContext = {
     server,
     session,
@@ -242,54 +288,40 @@ export const createServer = (
     activeTarget,
     recordEvidence,
     recordEvidenceWithUnknown,
-    withAdmittedAnalysis: withAdmittedAnalysis(source),
+    withAdmittedAnalysis: analysisAdmission,
+    artifactResources,
   };
   registerBinaryAnalysisTools(toolContext);
   const previousOnclose = server.server.onclose;
   server.server.onclose = () => {
     previousOnclose?.();
-    void android.close().catch((cause: unknown) => {
+    void closeProviders().catch((cause: unknown) => {
       logger.error(
         { error: cause instanceof Error ? cause.message : String(cause) },
-        "Android provider cleanup failed",
-      );
-    });
-    void apktool.close().catch((cause: unknown) => {
-      logger.error(
-        { error: cause instanceof Error ? cause.message : String(cause) },
-        "Apktool provider cleanup failed",
-      );
-    });
-    void jeb.close().catch((cause: unknown) => {
-      logger.error(
-        { error: cause instanceof Error ? cause.message : String(cause) },
-        "JEB provider cleanup failed",
+        "Provider cleanup failed during server shutdown",
       );
     });
   };
   const closeServer = server.close.bind(server);
   server.close = async () => {
-    const results = await Promise.allSettled([
-      closeServer(),
-      android.close(),
-      apktool.close(),
-      jeb.close(),
-    ]);
+    const results = await Promise.allSettled([closeServer(), closeProviders()]);
     for (const result of results)
       if (result.status === "rejected") throw result.reason;
   };
-  registerConfiguredAnalysisTools(toolContext, android, jeb);
+  registerConfiguredAnalysisTools(toolContext, android, jeb, firmwareAnalysis);
   registerAdbTools(
     server,
     new AdbDeviceAnalysisService(adbDevice),
     toolLogger,
     recordEvidence,
+    analysisAdmission,
   );
   registerApktoolTools(
     server,
     new ApktoolResourceAnalysisService(apktool),
     toolLogger,
     recordEvidence,
+    analysisAdmission,
   );
   registerObservationTools(toolContext);
   registerGuidedPrompts(server, analysis, session);
@@ -339,21 +371,25 @@ const registerConfiguredAnalysisTools = (
     logger: toolLogger,
     evidenceById,
     recordEvidence,
+    withAdmittedAnalysis,
   }: ServerToolContext,
   android: AndroidAnalysisPort,
   jeb: JebAnalysisPort,
+  firmwareAnalysis: FirmwareAnalysisService,
 ): void => {
   registerAndroidTools(
     server,
     new AndroidAnalysisService(android),
     toolLogger,
     recordEvidence,
+    withAdmittedAnalysis,
   );
   registerJebTools(
     server,
     new JebAnalysisService(jeb),
     toolLogger,
     recordEvidence,
+    withAdmittedAnalysis,
   );
   registerBinaryDiagnosticsTools(
     server,
@@ -361,57 +397,70 @@ const registerConfiguredAnalysisTools = (
     toolLogger,
     recordEvidence,
     evidenceById,
+    withAdmittedAnalysis,
   );
-  registerAnalysisViewTool(server, toolLogger, evidenceById, recordEvidence);
+  registerAnalysisViewTool(
+    server,
+    toolLogger,
+    evidenceById,
+    recordEvidence,
+    withAdmittedAnalysis,
+  );
   registerPeResourcesTool(
     server,
     createPeResourcesService(),
     toolLogger,
     recordEvidence,
+    withAdmittedAnalysis,
   );
   registerEvmTools(
     server,
     options.evmInterface ?? createEvmInterfaceService(environment),
     toolLogger,
     recordEvidence,
+    withAdmittedAnalysis,
   );
   registerRecordedCrashTools(
     server,
     options.recordedCrash ?? createRecordedCrashService(environment),
     toolLogger,
     recordEvidence,
+    withAdmittedAnalysis,
   );
   registerFirmwareTools(
     server,
-    new FirmwareAnalysisService(
-      options.firmwareAnalysis ?? createFirmwareAnalysisProvider(environment),
-    ),
+    firmwareAnalysis,
     toolLogger,
     recordEvidence,
+    withAdmittedAnalysis,
   );
   registerWebModuleTool(
     server,
     options.webModuleTrace ?? createWebModuleTraceService(environment),
     toolLogger,
     recordEvidence,
+    withAdmittedAnalysis,
   );
   registerWebSourceLocationTool(
     server,
     options.webSourceLocation ?? createWebSourceLocationService(environment),
     toolLogger,
     recordEvidence,
+    withAdmittedAnalysis,
   );
   registerWebRuntimeTools(
     server,
     options.webRuntime ?? createWebRuntimeService(),
     toolLogger,
     recordEvidence,
+    withAdmittedAnalysis,
   );
   registerWebNetworkCaptureTool(
     server,
     options.webNetworkCapture ?? createWebNetworkCaptureService(environment),
     toolLogger,
     recordEvidence,
+    withAdmittedAnalysis,
   );
   registerJavaScriptRecoveryTool(
     server,
@@ -421,6 +470,7 @@ const registerConfiguredAnalysisTools = (
     ),
     toolLogger,
     recordEvidence,
+    withAdmittedAnalysis,
   );
 };
 
@@ -451,6 +501,7 @@ const createSessionRecorders = (
 });
 
 interface ServerToolContext extends ReturnType<typeof createSessionRecorders> {
+  readonly artifactResources: ArtifactResourceScope;
   readonly server: EvidenceMcpServer;
   readonly session: BinarySessionPort | undefined;
   readonly options: CreateServerOptions;
@@ -509,6 +560,7 @@ const registerBinaryAnalysisTools = ({
       recordEvidence,
       recordEvidenceWithUnknown,
       session,
+      withAdmittedAnalysis,
     });
 };
 
@@ -519,9 +571,11 @@ const registerObservationTools = ({
   logger,
   recordEvidence,
   recordEvidenceWithUnknown,
+  withAdmittedAnalysis,
+  artifactResources,
 }: ServerToolContext): void => {
-  const common = { logger, recordEvidence };
-  registerWebScriptTool(server, common);
+  const common = { logger, recordEvidence, withAdmittedAnalysis };
+  registerWebScriptTool(server, { ...common, artifactResources });
   registerBrowserTools(server, {
     ...common,
     browser: options.browserObservation,
@@ -534,6 +588,7 @@ const registerObservationTools = ({
   });
   registerElectronTools(server, {
     ...common,
+    artifactResources,
     evidenceById,
     electron: options.electronObservation,
     electronActive: options.electronActiveObservation,
@@ -553,5 +608,6 @@ const registerObservationTools = ({
     logger,
     recordEvidence,
     recordEvidenceWithUnknown,
+    withAdmittedAnalysis,
   });
 };
