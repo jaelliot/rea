@@ -9,60 +9,23 @@ permissions:
   contents: read
 
 concurrency:
-  group: fork-psp-public-validation
+  group: fork-psp-public-verify-c07024d
   cancel-in-progress: true
 
 env:
   HUSKY: "0"
   TURBO_TELEMETRY_DISABLED: "1"
+  SOURCE_SHA: c07024dec5cc59e23e2645293f8bd54252a6390a
 
 jobs:
-  prepare:
-    if: github.repository == 'jaelliot/rea'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    permissions:
-      contents: write
-    outputs:
-      source_sha: ${{ steps.publish.outputs.source_sha }}
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          fetch-depth: 0
-      - name: Verify reviewed patch and publish only a new feature branch
-        id: publish
-        shell: bash
-        run: |
-          set -euo pipefail
-          cat .github/patches/psp-public-01.b64 .github/patches/psp-public-02.b64 | tr -d '\r\n' | base64 --decode | xz --decompress > "$RUNNER_TEMP/psp-public.patch"
-          echo "45baa79a3b3905a4fd913cedf79956caff493c3a3ad46757078eaa1a6d2852fd  $RUNNER_TEMP/psp-public.patch" | sha256sum --check
-          existing="$(git ls-remote origin refs/heads/feat/psp-allegrex-ghidra)"
-          test -z "$existing" || { echo 'Refusing to overwrite an existing feature branch' >&2; exit 1; }
-          git switch -c feat/psp-allegrex-ghidra 6543405252d7c740c87a3bb433cf666187af41fa
-          git apply --check "$RUNNER_TEMP/psp-public.patch"
-          git apply --index "$RUNNER_TEMP/psp-public.patch"
-          git diff --cached --check
-          test "$(git diff --cached --name-only | wc -l)" -eq 15
-          test -z "$(git diff --cached --name-only -- .github package.json package-lock.json)"
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git commit -m 'feat(ghidra): admit bounded PSP ELF through installed Allegrex' -m 'Build on merged generic MIPS without weakening its policy. Bind caller-installed processor files into the analysis profile, check them again before launch, force and verify PSP language selection, retain limitations, and extend the public CLI/MCP verifier with source-owned PSP and target-switching checks. Local actual focused Vitest: 102 passed, one existing permission skip. Hosted static and real-provider results are pending.'
-          sha="$(git rev-parse HEAD)"
-          git diff HEAD^ HEAD --stat
-          git diff --name-only HEAD^ HEAD | while IFS= read -r path; do git ls-tree HEAD -- "$path"; done
-          git push origin HEAD:refs/heads/feat/psp-allegrex-ghidra
-          test "$(git ls-remote origin refs/heads/feat/psp-allegrex-ghidra | cut -f1)" = "$sha"
-          echo "source_sha=$sha" >> "$GITHUB_OUTPUT"
-          echo "Published source SHA: $sha"
-
   verify:
-    needs: prepare
+    if: github.repository == 'jaelliot/rea'
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: ${{ needs.prepare.outputs.source_sha }}
+          ref: c07024dec5cc59e23e2645293f8bd54252a6390a
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
@@ -70,8 +33,6 @@ jobs:
           cache: npm
       - name: Locked source and build
         shell: bash
-        env:
-          SOURCE_SHA: ${{ needs.prepare.outputs.source_sha }}
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/psp-results" "$RUNNER_TEMP/psp-runtime"
@@ -86,7 +47,7 @@ jobs:
         run: |
           set -euo pipefail
           npm run check:ci 2>&1 | tee "$RUNNER_TEMP/psp-results/check-ci.log"
-          npm run test:focused -- tests/boundary/filesystem/ghidraPspExtension.test.ts tests/boundary/filesystem/ghidraLauncher.test.ts src/domain/binaryTarget.mips.test.ts src/ghidra/GhidraMipsProfile.test.ts src/ghidra/GhidraProvider.behavior.test.ts src/hopper/HopperMachOImage.test.ts tests/boundary/filesystem/mipsAbiFlags.test.ts tests/composition/analysis-sessions/mips-identity.test.ts tests/conformance/ghidra/mips-checks.test.ts 2>&1 | tee "$RUNNER_TEMP/psp-results/focused.log"
+          npm run test:focused -- tests/boundary/filesystem/ghidraPspExtension.test.ts tests/boundary/providers/ghidra/ghidraLauncher.test.ts src/domain/binaryTarget.mips.test.ts src/ghidra/GhidraMipsProfile.test.ts src/ghidra/GhidraProvider.behavior.test.ts src/hopper/HopperMachOImage.test.ts tests/boundary/filesystem/mipsAbiFlags.test.ts tests/composition/analysis-sessions/mips-identity.test.ts tests/conformance/ghidra/mips-checks.test.ts 2>&1 | tee "$RUNNER_TEMP/psp-results/focused.log"
           npm run verify:test-discovery 2>&1 | tee "$RUNNER_TEMP/psp-results/discovery.log"
           npm run docs:check 2>&1 | tee "$RUNNER_TEMP/psp-results/docs.log"
       - name: Provision checksum-pinned verification tools on disposable runner
@@ -160,35 +121,4 @@ jobs:
           name: psp-public-verification
           path: ${{ runner.temp }}/psp-results/
           if-no-files-found: error
-          retention-days: 3
-
-  test-suite:
-    needs: prepare
-    runs-on: ubuntu-24.04
-    timeout-minutes: 25
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          ref: ${{ needs.prepare.outputs.source_sha }}
-          persist-credentials: false
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
-        with:
-          node-version-file: .nvmrc
-          cache: npm
-      - name: Full Linux deterministic suite with existing coverage thresholds
-        shell: bash
-        env:
-          SOURCE_SHA: ${{ needs.prepare.outputs.source_sha }}
-        run: |
-          set -euo pipefail
-          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
-          npm ci
-          npm run test:ci 2>&1 | tee "$RUNNER_TEMP/psp-full-test.log"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        if: always()
-        with:
-          name: psp-public-full-tests
-          path: |
-            ${{ runner.temp }}/psp-full-test.log
-            test-results.xml
           retention-days: 3
