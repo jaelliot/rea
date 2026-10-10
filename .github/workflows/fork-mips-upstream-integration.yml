@@ -17,41 +17,70 @@ env:
   TURBO_TELEMETRY_DISABLED: "1"
   FEATURE_SHA: adf1cda29859ffcc063f40418b8ba39a0eac4fab
   UPSTREAM_SHA: 8550913cda311e5340cf012b9c4afd622e36e35b
-  SOURCE_SHA: 31a8944423687357adcc14e95b39a932e669c8ce
+  MERGE_SHA: 31a8944423687357adcc14e95b39a932e669c8ce
 
 jobs:
   provenance:
     if: github.repository == 'jaelliot/rea'
     runs-on: ubuntu-24.04
     timeout-minutes: 8
+    permissions:
+      contents: write
+    outputs:
+      source_sha: ${{ steps.repair.outputs.source_sha }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           ref: 31a8944423687357adcc14e95b39a932e669c8ce
           fetch-depth: 0
           persist-credentials: false
-      - name: Independently reproduce the merge tree without publishing
+      - name: Apply only the reviewed two-file repair to the reproducible merge
+        id: repair
         shell: bash
+        env:
+          PUSH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/integration"
-          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          test "$(git rev-parse HEAD)" = "$MERGE_SHA"
           test "$(git rev-parse HEAD^1)" = "$FEATURE_SHA"
           test "$(git rev-parse HEAD^2)" = "$UPSTREAM_SHA"
-          MERGED_TREE=$(git merge-tree --write-tree "$FEATURE_SHA" "$UPSTREAM_SHA")
-          test "$MERGED_TREE" = "$(git rev-parse 'HEAD^{tree}')"
-          ORIGINAL_BASE=$(git merge-base "$FEATURE_SHA" "$UPSTREAM_SHA")
-          printf 'source=%s\nfeature=%s\nupstream=%s\noriginal_base=%s\nmerged_tree=%s\n' "$SOURCE_SHA" "$FEATURE_SHA" "$UPSTREAM_SHA" "$ORIGINAL_BASE" "$MERGED_TREE" | tee "$RUNNER_TEMP/integration/inputs.txt"
-          git log --oneline "$ORIGINAL_BASE..$UPSTREAM_SHA" > "$RUNNER_TEMP/integration/upstream-commits.txt"
-          git diff --name-only "$ORIGINAL_BASE" "$FEATURE_SHA" | sort > "$RUNNER_TEMP/integration/contribution-paths.txt"
-          git diff --name-only "$ORIGINAL_BASE" "$UPSTREAM_SHA" | sort > "$RUNNER_TEMP/integration/upstream-paths.txt"
-          comm -12 "$RUNNER_TEMP/integration/contribution-paths.txt" "$RUNNER_TEMP/integration/upstream-paths.txt" | tee "$RUNNER_TEMP/integration/overlapping-paths.txt"
-          git show --no-patch --format=fuller HEAD | tee "$RUNNER_TEMP/integration/commit.txt"
+          test "$(git merge-tree --write-tree "$FEATURE_SHA" "$UPSTREAM_SHA")" = "$(git rev-parse 'HEAD^{tree}')"
+          git fetch --no-tags origin e22abec18335069b4e29d47c5d65e6b16966d08e
+          git show e22abec18335069b4e29d47c5d65e6b16966d08e:.github/workflows/mips-integration-repair.patch > "$RUNNER_TEMP/integration/repair.patch"
+          test "$(git hash-object "$RUNNER_TEMP/integration/repair.patch")" = b60d9083eda5b3a6e75de5f5908ba030b2e567a6
+          git apply --index "$RUNNER_TEMP/integration/repair.patch"
+          git diff --cached --check
+          test "$(git write-tree)" = 2394389256fb3f813331a1fc9a8a038790144f1e
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git config core.hooksPath /dev/null
+          git commit -m 'fix(ghidra): preserve host-tool checks after MIPS integration' -m 'Use a type-safe membership predicate for the widened discriminated architecture union in upstream native-decompiler inspection. Add both-endian cases refusing a MIPS target at the Linux x64 decompiler path. The integrated build previously failed TS2345; 45 local actual Vitest installation cases passed with cached dependencies. Full locked and real-provider validation follows against this commit. No provider admission policy is broadened.'
+          CANDIDATE=$(git rev-parse HEAD)
+          git show --no-patch --format=fuller HEAD | tee "$RUNNER_TEMP/integration/candidate.txt"
+          BRANCH=integration/mips-upstream-8550913
+          EXISTING=$(git ls-remote origin "refs/heads/$BRANCH" | cut -f1)
+          if test "$EXISTING" = "$MERGE_SHA"; then
+            AUTH=$(printf 'x-access-token:%s' "$PUSH_TOKEN" | base64 -w0)
+            git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $AUTH" push origin "HEAD:refs/heads/$BRANCH"
+            unset AUTH
+          else
+            git fetch --no-tags origin "refs/heads/$BRANCH"
+            test "$(git rev-parse FETCH_HEAD)" = "$EXISTING"
+            test "$(git rev-parse "$EXISTING^1")" = "$MERGE_SHA"
+            test "$(git rev-parse "$EXISTING^{tree}")" = 2394389256fb3f813331a1fc9a8a038790144f1e
+            git switch --detach "$EXISTING"
+          fi
+          unset PUSH_TOKEN
+          SOURCE_SHA=$(git rev-parse HEAD)
+          test "$(git ls-remote origin "refs/heads/$BRANCH" | cut -f1)" = "$SOURCE_SHA"
+          echo "source_sha=$SOURCE_SHA" >> "$GITHUB_OUTPUT"
+          printf 'source=%s\nmerge=%s\nfeature=%s\nupstream=%s\n' "$SOURCE_SHA" "$MERGE_SHA" "$FEATURE_SHA" "$UPSTREAM_SHA" | tee "$RUNNER_TEMP/integration/inputs.txt"
           git diff --stat "$UPSTREAM_SHA" HEAD | tee "$RUNNER_TEMP/integration/contribution-stat.txt"
           git diff --check "$UPSTREAM_SHA" HEAD
           git diff "$UPSTREAM_SHA" HEAD > "$RUNNER_TEMP/integration/contribution.diff"
           git archive --format=tar.gz HEAD > "$RUNNER_TEMP/integration/source.tar.gz"
-          echo "Read-only verification of source $SOURCE_SHA on upstream $UPSTREAM_SHA" >> "$GITHUB_STEP_SUMMARY"
+          echo "Source $SOURCE_SHA on upstream $UPSTREAM_SHA; only the temporary integration branch was updated." >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
@@ -64,10 +93,12 @@ jobs:
     needs: provenance
     runs-on: ubuntu-24.04
     timeout-minutes: 25
+    env:
+      SOURCE_SHA: ${{ needs.provenance.outputs.source_sha }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: 31a8944423687357adcc14e95b39a932e669c8ce
+          ref: ${{ needs.provenance.outputs.source_sha }}
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
@@ -85,7 +116,7 @@ jobs:
       - name: Focused MIPS and affected production-boundary tests
         run: |
           set -euo pipefail
-          npm run test:focused -- src/domain/binaryTarget.mips.test.ts src/ghidra/GhidraMipsProfile.test.ts src/ghidra/GhidraProvider.behavior.test.ts src/hopper/HopperMachOImage.test.ts tests/boundary/filesystem/mipsAbiFlags.test.ts tests/composition/analysis-sessions/mips-identity.test.ts tests/conformance/ghidra/mips-checks.test.ts 2>&1 | tee "$RUNNER_TEMP/results/focused.log"
+          npm run test:focused -- src/domain/binaryTarget.mips.test.ts src/ghidra/GhidraMipsProfile.test.ts src/ghidra/GhidraProvider.behavior.test.ts src/ghidra/GhidraInstallation.test.ts src/hopper/HopperMachOImage.test.ts tests/boundary/filesystem/mipsAbiFlags.test.ts tests/composition/analysis-sessions/mips-identity.test.ts tests/conformance/ghidra/mips-checks.test.ts 2>&1 | tee "$RUNNER_TEMP/results/focused.log"
       - name: Unchanged repository gates and generated contracts
         run: |
           set -euo pipefail
@@ -114,10 +145,12 @@ jobs:
     needs: provenance
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    env:
+      SOURCE_SHA: ${{ needs.provenance.outputs.source_sha }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: 31a8944423687357adcc14e95b39a932e669c8ce
+          ref: ${{ needs.provenance.outputs.source_sha }}
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
