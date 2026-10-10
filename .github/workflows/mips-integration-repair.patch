@@ -1,0 +1,55 @@
+diff --git a/src/ghidra/GhidraInstallation.test.ts b/src/ghidra/GhidraInstallation.test.ts
+index 4f5dfce..782b264 100644
+--- a/src/ghidra/GhidraInstallation.test.ts
++++ b/src/ghidra/GhidraInstallation.test.ts
+@@ -568,6 +568,35 @@ describe("Ghidra FAT native decompiler admission", () => {
+ });
+ 
+ describe("Ghidra native decompiler admission", () => {
++  it.each([
++    { name: "little-endian", encoding: 1 },
++    { name: "big-endian", encoding: 2 },
++  ])("rejects a $name MIPS target as a host decompiler", ({ encoding }) => {
++    const bytes = elf(1, encoding, 8);
++    const result = inspectGhidraInstallation(
++      {
++        environment: {},
++        installDir: INSTALL,
++        platform: "linux",
++        architecture: "x64",
++      },
++      host({
++        executableHeader: (path: string) =>
++          path === LINUX_DECOMPILER ? { bytes, size: bytes.length } : undefined,
++      }),
++    );
++    expect(result.status).toBe("unavailable");
++    expect(
++      result.checks.find(({ name }) => name === "native_decompiler"),
++    ).toMatchObject({
++      status: "failed",
++      code: "executable_missing",
++      detail: expect.stringContaining(
++        "reports elf mips, but linux/x64 requires elf x86_64",
++      ),
++    });
++  });
++
+   it.each([
+     {
+       name: "a Linux x86-64 decompiler at the macOS arm64 path",
+diff --git a/src/ghidra/GhidraInstallation.ts b/src/ghidra/GhidraInstallation.ts
+index d60d447..4ff7a68 100644
+--- a/src/ghidra/GhidraInstallation.ts
++++ b/src/ghidra/GhidraInstallation.ts
+@@ -116,7 +116,9 @@ const assessNativeDecompiler = (
+       const alternative = parseExecutableHeader(probe.bytes, node, probe.size);
+       if (
+         alternative.ok &&
+-        !alternative.value.availableArchitectures.includes(expectedArchitecture)
++        !alternative.value.availableArchitectures.some(
++          (available) => available === expectedArchitecture,
++        )
+       ) {
+         parsed = alternative;
+         break;
