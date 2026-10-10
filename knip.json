@@ -6,7 +6,8 @@
     "src/contracts/errorSchemas.ts",
     "src/evaluation/AgentEvaluationFixtures.ts",
     "src/application/RealHopperAssertions.ts",
-    "tests/processOwnershipRunner.ts"
+    "tests/processOwnershipRunner.ts",
+    "scripts/verify-ghidra-psp-spike.mjs"
   ],
   "project": ["src/**/*.ts", "tests/**/*.ts", "scripts/**/*.mjs"],
   "vitepress": {
