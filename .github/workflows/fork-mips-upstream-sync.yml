@@ -13,9 +13,9 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  FEATURE_SHA: adf1cda29859ffcc063f40418b8ba39a0eac4fab
+  MERGE_SHA: 2b7f9586d4f5aad0b4220de2f8971aac5d1c00ae
   UPSTREAM_SHA: 81cdafc132c7ba3bd6e12b1169f9e3687025d07b
-  INTEGRATION_BRANCH: integration/mips-upstream-81cdafc
+  INTEGRATION_BRANCH: integration/mips-upstream-81cdafc-fix1
   HUSKY: "0"
   TURBO_TELEMETRY_DISABLED: "1"
 
@@ -27,48 +27,74 @@ jobs:
     permissions:
       contents: write
     outputs:
-      source_sha: ${{ steps.integrate.outputs.source_sha }}
+      source_sha: ${{ steps.correct.outputs.source_sha }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: adf1cda29859ffcc063f40418b8ba39a0eac4fab
+          ref: 2b7f9586d4f5aad0b4220de2f8971aac5d1c00ae
           fetch-depth: 0
           persist-credentials: false
-      - name: Prepare a normal integration commit; never update main or merge a PR
-        id: integrate
+      - name: Apply only the inspected integration correction and regression
+        id: correct
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "$FEATURE_SHA"
+          test "$(git rev-parse HEAD)" = "$MERGE_SHA"
+          test "$(git rev-parse HEAD^2)" = "$UPSTREAM_SHA"
           git config --local core.hooksPath /dev/null
           git config --local user.name 'github-actions[bot]'
           git config --local user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git fetch --no-tags https://github.com/morluto/rea.git "$UPSTREAM_SHA"
-          test "$(git rev-parse FETCH_HEAD)" = "$UPSTREAM_SHA"
           git switch -c "$INTEGRATION_BRANCH"
-          git merge --no-ff "$UPSTREAM_SHA" -m "chore: synchronize MIPS contribution with upstream 81cdafc"
-          test "$(git rev-parse HEAD^1)" = "$FEATURE_SHA"
-          test "$(git rev-parse HEAD^2)" = "$UPSTREAM_SHA"
-          git diff --check "$UPSTREAM_SHA" HEAD
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('src/ghidra/GhidraInstallation.ts')
+          text = path.read_text()
+          before = '!alternative.value.availableArchitectures.includes(expectedArchitecture)'
+          after = '!alternative.value.availableArchitectures.some(\n          (available) => available === expectedArchitecture,\n        )'
+          assert text.count(before) == 1, 'Expected exactly one inspected membership check'
+          path.write_text(text.replace(before, after))
+          path = Path('src/ghidra/GhidraInstallation.test.ts')
+          text = path.read_text()
+          anchor = 'describe("Ghidra native decompiler admission", () => {\n  it.each([\n'
+          addition = '''    {
+                name: "a MIPS decompiler at the Linux x64 path",
+                options: {
+                  environment: {},
+                  installDir: INSTALL,
+                  platform: "linux" as const,
+                  architecture: "x64" as const,
+                },
+                executableHeader: (path: string) =>
+                  path === LINUX_DECOMPILER
+                    ? { bytes: elf(1, 1, 8), size: 52 }
+                    : undefined,
+              },
+          '''
+          import textwrap
+          addition = textwrap.dedent(addition)
+          addition = ''.join('    ' + line if line.strip() else line for line in addition.splitlines(keepends=True))
+          assert text.count(anchor) == 1, 'Expected exactly one native-tool table'
+          path.write_text(text.replace(anchor, anchor + addition))
+          PY
+          git diff --check
+          git diff --stat
+          git diff -- src/ghidra/GhidraInstallation.ts src/ghidra/GhidraInstallation.test.ts
+          git add src/ghidra/GhidraInstallation.ts src/ghidra/GhidraInstallation.test.ts
+          git commit -m 'fix(ghidra): preserve native-tool architecture checks after MIPS integration' -m 'The conflict-free upstream merge failed TypeScript compilation because includes on the union of MIPS-only and other architecture arrays requires never. Use equality-based membership without casts or changing accepted native hosts. Extend the existing native-decompiler rejection table with a MIPS executable at a Linux x64 tool path; retain upstream FAT and unknown-header behavior. Hosted verification follows this commit; no success is claimed yet.'
           mkdir -p "$RUNNER_TEMP/mips-sync"
-          git show -s --format=fuller HEAD | tee "$RUNNER_TEMP/mips-sync/commit.txt"
-          git diff --stat "$UPSTREAM_SHA" HEAD | tee "$RUNNER_TEMP/mips-sync/contribution-stat.txt"
+          git show --stat HEAD | tee "$RUNNER_TEMP/mips-sync/correction.txt"
           git diff --binary "$UPSTREAM_SHA" HEAD > "$RUNNER_TEMP/mips-sync/contribution.patch"
           echo "source_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-          echo "source_tree=$(git rev-parse 'HEAD^{tree}')" >> "$GITHUB_OUTPUT"
-          printf 'SOURCE_SHA=%s\nSOURCE_TREE=%s\n' "$(git rev-parse HEAD)" "$(git rev-parse 'HEAD^{tree}')"
+          printf 'SOURCE_SHA=%s\n' "$(git rev-parse HEAD)"
       - name: Publish only the temporary integration branch
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
-          case "$INTEGRATION_BRANCH" in integration/mips-upstream-81cdafc) ;; *) exit 1;; esac
+          case "$INTEGRATION_BRANCH" in integration/mips-upstream-81cdafc-fix1) ;; *) exit 1;; esac
           existing=$(git ls-remote https://github.com/jaelliot/rea.git "refs/heads/$INTEGRATION_BRANCH" | cut -f1)
-          if test -n "$existing"; then
-            echo 'Integration destination already exists; refusing to overwrite it.' >&2
-            exit 1
-          fi
+          test -z "$existing"
           git -c 'credential.helper=!f() { echo username=x-access-token; echo "password=$GH_TOKEN"; }; f' push https://github.com/jaelliot/rea.git "HEAD:refs/heads/$INTEGRATION_BRANCH"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
@@ -109,7 +135,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          npm run test:focused -- src/domain/binaryTarget.mips.test.ts src/ghidra/GhidraMipsProfile.test.ts src/ghidra/GhidraProvider.behavior.test.ts src/hopper/HopperMachOImage.test.ts tests/boundary/filesystem/mipsAbiFlags.test.ts tests/composition/analysis-sessions/mips-identity.test.ts tests/conformance/ghidra/mips-checks.test.ts 2>&1 | tee "$RUNNER_TEMP/mips-result/focused.log"
+          npm run test:focused -- src/domain/binaryTarget.mips.test.ts src/ghidra/GhidraMipsProfile.test.ts src/ghidra/GhidraProvider.behavior.test.ts src/ghidra/GhidraInstallation.test.ts src/hopper/HopperMachOImage.test.ts tests/boundary/filesystem/mipsAbiFlags.test.ts tests/composition/analysis-sessions/mips-identity.test.ts tests/conformance/ghidra/mips-checks.test.ts 2>&1 | tee "$RUNNER_TEMP/mips-result/focused.log"
           npm run check:ci 2>&1 | tee "$RUNNER_TEMP/mips-result/check-ci.log"
           npm run verify:test-discovery 2>&1 | tee "$RUNNER_TEMP/mips-result/discovery.log"
           npm run docs:check 2>&1 | tee "$RUNNER_TEMP/mips-result/docs-check.log"
