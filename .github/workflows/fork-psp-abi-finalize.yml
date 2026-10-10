@@ -1,4 +1,4 @@
-name: Fork PSP ABI final verification
+name: Fork PSP upstream integration verification
 
 on:
   push:
@@ -11,70 +11,69 @@ permissions:
 env:
   HUSKY: "0"
   TURBO_TELEMETRY_DISABLED: "1"
-  SOURCE_SHA: 35fe387cae12fa1f2837e65b78067a06f8dc63ff
+  SOURCE_SHA: 8e1d69bd41ad118c4dd434e8a2bdb60a9e25fc0c
+  UPSTREAM_SHA: 926c2d6ba7975522d63a8dbb0d448f5b9d1514d4
+  CANDIDATE_BRANCH: test/psp-upstream-926c2d6
 
 jobs:
   verify:
     if: github.repository == 'jaelliot/rea'
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 25
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: 35fe387cae12fa1f2837e65b78067a06f8dc63ff
+          ref: 8e1d69bd41ad118c4dd434e8a2bdb60a9e25fc0c
+          fetch-depth: 0
           persist-credentials: false
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
-        with:
-          node-version-file: .nvmrc
-          cache: npm
-      - name: Preserve explicit MIPS fixture types and commit exact candidate
+      - name: Integrate the exact upstream revision without automatic conflict resolution
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/psp-results" "$RUNNER_TEMP/psp-runtime"
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
           test -z "$(git status --porcelain)"
-          python - <<'PY'
-          from pathlib import Path
-          p = Path('tests/boundary/filesystem/ghidraPspExtension.test.ts')
-          text = p.read_text()
-          old = 'const altered: BinaryTarget = {'
-          new = 'const altered: Extract<BinaryTarget, { architecture: "mips" }> = {'
-          assert text.count(old) == 2
-          p.write_text(text.replace(old, new))
-          PY
-          npm ci
-          npm exec oxfmt -- --write tests/boundary/filesystem/ghidraPspExtension.test.ts
-          git diff --check
-          git diff > "$RUNNER_TEMP/psp-results/typed-fixtures.patch"
+          git fetch --no-tags https://github.com/morluto/rea.git "$UPSTREAM_SHA"
+          test "$(git rev-parse FETCH_HEAD)" = "$UPSTREAM_SHA"
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add -- tests/boundary/filesystem/ghidraPspExtension.test.ts
-          git commit -m 'test(ghidra): contextually type PSP metadata as the MIPS target variant'
+          git merge --no-ff "$UPSTREAM_SHA" -m 'chore: synchronize PSP contribution with upstream 926c2d6' 2>&1 | tee "$RUNNER_TEMP/psp-results/merge.log"
+          git merge-base --is-ancestor "$SOURCE_SHA" HEAD
+          git merge-base --is-ancestor "$UPSTREAM_SHA" HEAD
           git rev-parse HEAD | tee "$RUNNER_TEMP/psp-results/source-sha.txt"
-      - name: Build and existing static gates
-        shell: bash
-        run: |
-          set -euo pipefail
-          npm run build:cached 2>&1 | tee "$RUNNER_TEMP/psp-results/build.log"
-          npm run check:ci 2>&1 | tee "$RUNNER_TEMP/psp-results/check-ci.log"
-      - name: Actual affected suites and documentation gates
-        shell: bash
-        run: |
-          set -euo pipefail
-          npm run test:focused -- tests/boundary/filesystem/ghidraPspExtension.test.ts tests/conformance/ghidra/psp-checks.test.ts tests/boundary/providers/ghidra/ghidraLauncher.test.ts src/domain/binaryTarget.mips.test.ts src/ghidra/GhidraMipsProfile.test.ts src/ghidra/GhidraProvider.behavior.test.ts src/hopper/HopperMachOImage.test.ts tests/boundary/filesystem/mipsAbiFlags.test.ts tests/composition/analysis-sessions/mips-identity.test.ts tests/conformance/ghidra/mips-checks.test.ts 2>&1 | tee "$RUNNER_TEMP/psp-results/focused.log"
-          npm run verify:test-discovery 2>&1 | tee "$RUNNER_TEMP/psp-results/discovery.log"
-          npm run docs:check 2>&1 | tee "$RUNNER_TEMP/psp-results/docs.log"
-      - name: Advance only isolated candidate with expected-head check
+          git show --no-patch --format=raw HEAD > "$RUNNER_TEMP/psp-results/parents.txt"
+          git diff --stat "$UPSTREAM_SHA" HEAD | tee "$RUNNER_TEMP/psp-results/contribution-stat.txt"
+          git diff --check "$UPSTREAM_SHA" HEAD
+      - name: Publish only the isolated integration checkpoint
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          test "$(git ls-remote --heads origin fix/psp-abi-record-validation | cut -f1)" = "$SOURCE_SHA"
-          git -c credential.helper='!gh auth git-credential' push origin HEAD:refs/heads/fix/psp-abi-record-validation
+          test -z "$(git ls-remote --heads origin "$CANDIDATE_BRANCH")"
+          git -c credential.helper='!gh auth git-credential' push origin "HEAD:refs/heads/$CANDIDATE_BRANCH"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Locked build and existing static gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --version
+          npm --version
+          npm ci
+          npm run build:cached 2>&1 | tee "$RUNNER_TEMP/psp-results/build.log"
+          npm run check:ci 2>&1 | tee "$RUNNER_TEMP/psp-results/check-ci.log"
+      - name: PSP regressions and the previously failing integration areas
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run test:focused -- tests/boundary/filesystem/ghidraPspExtension.test.ts tests/conformance/ghidra/psp-checks.test.ts tests/boundary/providers/ghidra/ghidraLauncher.test.ts src/domain/binaryTarget.mips.test.ts src/ghidra/GhidraMipsProfile.test.ts src/ghidra/GhidraProvider.behavior.test.ts src/hopper/HopperMachOImage.test.ts tests/boundary/filesystem/mipsAbiFlags.test.ts tests/composition/analysis-sessions/mips-identity.test.ts tests/conformance/ghidra/mips-checks.test.ts tests/boundary/evm/evmoleInterfaceProvider.test.ts tests/boundary/browser/cdpCleanupCancellation.test.ts tests/boundary/firmware/firmwareIntegration.test.ts tests/boundary/firmware/firmwareWorkspaceRecovery.test.ts tests/boundary/filesystem/qwenClientConfiguration.test.ts 2>&1 | tee "$RUNNER_TEMP/psp-results/focused.log"
+          npm run verify:test-discovery 2>&1 | tee "$RUNNER_TEMP/psp-results/discovery.log"
+          npm run docs:check 2>&1 | tee "$RUNNER_TEMP/psp-results/docs.log"
       - name: Provision checksum-pinned verification tools
         shell: bash
         run: |
@@ -128,7 +127,7 @@ jobs:
         run: |
           set -euo pipefail
           node scripts/verify-real-ghidra-mips.mjs 2>&1 | tee "$RUNNER_TEMP/psp-results/generic-mips.log"
-      - name: Preserve diagnostics and check clean source
+      - name: Preserve diagnostics and verify source cleanliness
         if: always()
         shell: bash
         run: |
@@ -142,7 +141,7 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
-          name: psp-abi-final-verification
+          name: psp-upstream-integration-926c2d6
           path: ${{ runner.temp }}/psp-results/
           if-no-files-found: error
           retention-days: 3
