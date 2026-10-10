@@ -1,0 +1,71 @@
+name: Fork PSP ABI diagnostics
+
+on:
+  push:
+    branches: [ci/psp-public-validation]
+    paths: [.github/workflows/fork-psp-abi-diagnostics.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    if: github.repository == 'jaelliot/rea'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      HUSKY: "0"
+      SOURCE_SHA: c07024dec5cc59e23e2645293f8bd54252a6390a
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: c07024dec5cc59e23e2645293f8bd54252a6390a
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Verify source identity and provision pinned PSP toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          mkdir -p "$RUNNER_TEMP/abi-results" "$RUNNER_TEMP/abi-fixture" "$RUNNER_TEMP/abi-tools"
+          git rev-parse HEAD | tee "$RUNNER_TEMP/abi-results/source-sha.txt"
+          sudo apt-get update -qq
+          sudo apt-get install --no-install-recommends -y libgmp10 libmpfr6 libmpc3 libreadline-dev libusb-dev
+          curl --fail --location --retry 2 --max-time 180 'https://github.com/pspdev/pspdev/releases/download/v20261001/pspdev-ubuntu-latest-x86_64.tar.gz' -o "$RUNNER_TEMP/pspdev.tar.gz"
+          echo "a86efe624e770005290919617859e9df24bd8fcd3e364f4587f23ec7364b0acd  $RUNNER_TEMP/pspdev.tar.gz" | sha256sum --check
+          tar -xzf "$RUNNER_TEMP/pspdev.tar.gz" -C "$RUNNER_TEMP/abi-tools"
+          test -x "$RUNNER_TEMP/abi-tools/pspdev/bin/psp-gcc"
+          echo "PSPDEV=$RUNNER_TEMP/abi-tools/pspdev" >> "$GITHUB_ENV"
+          echo "$RUNNER_TEMP/abi-tools/pspdev/bin" >> "$GITHUB_PATH"
+      - name: Independently inspect maintained fixture without executing it
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE' | tee "$RUNNER_TEMP/abi-results/fixture.log"
+          import { buildPspFixture } from './tests/conformance/ghidra/psp-fixture.mjs';
+          import { writeFile } from 'node:fs/promises';
+          import { join } from 'node:path';
+          const fixture = await buildPspFixture(join(process.env.RUNNER_TEMP, 'abi-fixture'));
+          console.log(JSON.stringify({sha256: fixture.sha256, source_sha256: fixture.source_sha256, versions: fixture.versions}, null, 2));
+          console.log(fixture.readelf);
+          console.log(fixture.objdump);
+          await writeFile(join(process.env.RUNNER_TEMP, 'abi-results', 'independent-fixture.json'), JSON.stringify(fixture, null, 2));
+          NODE
+          psp-readelf -W -l -S -x .MIPS.abiflags "$RUNNER_TEMP/abi-fixture/rea_psp_fixture.elf" | tee "$RUNNER_TEMP/abi-results/elf-records.txt"
+          psp-gcc -Q --help=target | grep -E 'march=|mabi=|mfp|single-float|double-float|odd-spreg' | tee "$RUNNER_TEMP/abi-results/compiler-target.txt"
+      - name: Full source formatting diagnosis
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci
+          npm exec oxfmt -- --check . 2>&1 | tee "$RUNNER_TEMP/abi-results/format.log"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: psp-independent-abi-diagnostics
+          path: ${{ runner.temp }}/abi-results/
+          if-no-files-found: error
+          retention-days: 3
