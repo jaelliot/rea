@@ -1,0 +1,51 @@
+name: Fork PSP public admission
+
+on:
+  push:
+    branches: [ci/psp-public-validation]
+    paths: [.github/workflows/fork-psp-public.yml]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fork-psp-public-validation
+  cancel-in-progress: true
+
+env:
+  HUSKY: "0"
+  TURBO_TELEMETRY_DISABLED: "1"
+
+jobs:
+  snapshot:
+    if: github.repository == 'jaelliot/rea'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: 6543405252d7c740c87a3bb433cf666187af41fa
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Export exact source and locked public development dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = 6543405252d7c740c87a3bb433cf666187af41fa
+          npm ci
+          mkdir -p "$RUNNER_TEMP/psp-dev-snapshot"
+          git rev-parse HEAD > "$RUNNER_TEMP/psp-dev-snapshot/source-sha.txt"
+          git archive HEAD | gzip -n > "$RUNNER_TEMP/psp-dev-snapshot/source.tar.gz"
+          tar -czf "$RUNNER_TEMP/psp-dev-snapshot/dependencies.tar.gz" node_modules
+          tar -czf "$RUNNER_TEMP/psp-dev-snapshot/node-toolchain.tar.gz" -C "$(dirname "$(dirname "$(command -v node)")")" bin lib/node_modules/npm
+          cd "$RUNNER_TEMP/psp-dev-snapshot"
+          sha256sum *.tar.gz > archive-sha256.txt
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: psp-public-dev-6543405
+          path: ${{ runner.temp }}/psp-dev-snapshot/
+          compression-level: 0
+          retention-days: 1
