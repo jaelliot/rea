@@ -89,6 +89,7 @@ jobs:
           grep -F 'PSP_EXTENSION_UNAVAILABLE:' "$RUNNER_TEMP/psp-results/missing-extension.log"
           echo 'Missing extension was rejected before fixture or bridge startup.'
       - name: Install extension in this disposable distribution only
+        id: extension_install
         shell: bash
         run: |
           set -euo pipefail
@@ -100,9 +101,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          node scripts/verify-ghidra-psp-spike.mjs 2> "$RUNNER_TEMP/psp-results/psp-stderr.log" | tee "$RUNNER_TEMP/psp-results/psp-report.json"
+          if node scripts/verify-ghidra-psp-spike.mjs > "$RUNNER_TEMP/psp-results/psp-report.json" 2> "$RUNNER_TEMP/psp-results/psp-stderr.log"; then
+            cat "$RUNNER_TEMP/psp-results/psp-report.json"
+          else
+            cat "$RUNNER_TEMP/psp-results/psp-stderr.log" >&2
+            exit 1
+          fi
       - name: Existing generic LE and BE MIPS public CLI/MCP verification with extension installed
-        if: ${{ !cancelled() && steps.psp-tools.outcome != 'failure' }}
+        if: ${{ !cancelled() && steps.extension_install.outcome == 'success' }}
         shell: bash
         run: |
           set -euo pipefail
