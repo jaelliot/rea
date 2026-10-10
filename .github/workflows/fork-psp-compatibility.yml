@@ -1,0 +1,128 @@
+name: Fork PSP Allegrex compatibility
+
+on:
+  push:
+    branches: [ci/psp-compatibility]
+    paths: [.github/workflows/fork-psp-compatibility.yml]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fork-psp-compatibility
+  cancel-in-progress: true
+
+env:
+  HUSKY: "0"
+  TURBO_TELEMETRY_DISABLED: "1"
+  SOURCE_SHA: 442bb1eacf63b99fd9827c2cc31091a250242ad9
+
+jobs:
+  compatibility:
+    if: github.repository == 'jaelliot/rea'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: 442bb1eacf63b99fd9827c2cc31091a250242ad9
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Locked source and runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/psp-results" "$RUNNER_TEMP/psp-runtime"
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          git rev-parse HEAD | tee "$RUNNER_TEMP/psp-results/source-sha.txt"
+          node --version
+          npm --version
+          npm ci
+          npm run build:cached
+      - name: Unchanged static gates and affected real Vitest suites
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run check:ci 2>&1 | tee "$RUNNER_TEMP/psp-results/check-ci.log"
+          npm run test:focused -- src/domain/binaryTarget.mips.test.ts src/ghidra/GhidraMipsProfile.test.ts src/ghidra/GhidraProvider.behavior.test.ts src/hopper/HopperMachOImage.test.ts tests/boundary/filesystem/mipsAbiFlags.test.ts tests/composition/analysis-sessions/mips-identity.test.ts tests/conformance/ghidra/mips-checks.test.ts 2>&1 | tee "$RUNNER_TEMP/psp-results/focused.log"
+          npm run docs:check 2>&1 | tee "$RUNNER_TEMP/psp-results/docs-check.log"
+      - name: Provision checksum-pinned tools only in the ephemeral runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${JAVA_HOME_21_X64:-}"
+          echo "JAVA_HOME=$JAVA_HOME_21_X64" >> "$GITHUB_ENV"
+          "$JAVA_HOME_21_X64/bin/java" -version 2>&1 | tee "$RUNNER_TEMP/psp-results/java.txt"
+          sudo apt-get update -qq
+          sudo apt-get install --no-install-recommends -y clang-18 lld-18 binutils libgmp10 libmpfr6 libmpc3 libreadline-dev libusb-dev
+          echo "REA_MIPS_CLANG=clang-18" >> "$GITHUB_ENV"
+          echo '/usr/lib/llvm-18/bin' >> "$GITHUB_PATH"
+          curl --fail --location --retry 2 --max-time 180 'https://github.com/NationalSecurityAgency/ghidra/releases/download/Ghidra_12.1.3_build/ghidra_12.1.3_PUBLIC_20260817.zip' -o "$RUNNER_TEMP/psp-ghidra.zip"
+          echo "93a5d11a9ad510622acaaf908c556a7b9b764d338e78a7567f3689bf5081fd54  $RUNNER_TEMP/psp-ghidra.zip" | sha256sum --check
+          unzip -q "$RUNNER_TEMP/psp-ghidra.zip" -d "$RUNNER_TEMP/psp-ghidra"
+          GHIDRA_DIR="$RUNNER_TEMP/psp-ghidra/ghidra_12.1.3_PUBLIC"
+          test -x "$GHIDRA_DIR/support/analyzeHeadless"
+          echo "GHIDRA_INSTALL_DIR=$GHIDRA_DIR" >> "$GITHUB_ENV"
+          curl --fail --location --retry 2 --max-time 180 'https://github.com/pspdev/pspdev/releases/download/v20261001/pspdev-ubuntu-latest-x86_64.tar.gz' -o "$RUNNER_TEMP/pspdev.tar.gz"
+          echo "a86efe624e770005290919617859e9df24bd8fcd3e364f4587f23ec7364b0acd  $RUNNER_TEMP/pspdev.tar.gz" | sha256sum --check
+          mkdir -p "$RUNNER_TEMP/psp-tools"
+          tar -xzf "$RUNNER_TEMP/pspdev.tar.gz" -C "$RUNNER_TEMP/psp-tools"
+          PSPDEV_DIR="$RUNNER_TEMP/psp-tools/pspdev"
+          test -x "$PSPDEV_DIR/bin/psp-gcc"
+          echo "PSPDEV=$PSPDEV_DIR" >> "$GITHUB_ENV"
+          echo "$PSPDEV_DIR/bin" >> "$GITHUB_PATH"
+          echo "TMPDIR=$RUNNER_TEMP/psp-runtime" >> "$GITHUB_ENV"
+          curl --fail --location --retry 2 --max-time 90 'https://github.com/kotcrab/ghidra-allegrex/releases/download/v21.4/ghidra_12.1.3_PUBLIC_20260825_ghidra-allegrex.zip' -o "$RUNNER_TEMP/allegrex.zip"
+          echo "62e829fa9e6ed6f2bd343763fb339a3f8812b02a4e0ed5a9409b14007b408243  $RUNNER_TEMP/allegrex.zip" | sha256sum --check
+          sha256sum "$RUNNER_TEMP/psp-ghidra.zip" "$RUNNER_TEMP/pspdev.tar.gz" "$RUNNER_TEMP/allegrex.zip" > "$RUNNER_TEMP/psp-results/tool-archives.sha256"
+      - name: Missing-extension preflight must fail actionably
+        shell: bash
+        run: |
+          set -euo pipefail
+          if node scripts/verify-ghidra-psp-spike.mjs > "$RUNNER_TEMP/psp-results/missing-extension.log" 2>&1; then
+            echo 'Expected a missing-extension failure, not success' >&2
+            exit 1
+          fi
+          grep -F 'PSP_EXTENSION_UNAVAILABLE:' "$RUNNER_TEMP/psp-results/missing-extension.log"
+          echo 'Missing extension was rejected before fixture or bridge startup.'
+      - name: Install extension in this disposable distribution only
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$GHIDRA_INSTALL_DIR/Ghidra/Extensions"
+          unzip -q "$RUNNER_TEMP/allegrex.zip" -d "$GHIDRA_INSTALL_DIR/Ghidra/Extensions"
+          test -f "$GHIDRA_INSTALL_DIR/Ghidra/Extensions/ghidra-allegrex/extension.properties"
+          cat "$GHIDRA_INSTALL_DIR/Ghidra/Extensions/ghidra-allegrex/extension.properties"
+      - name: Source-owned PSP bridge compatibility and public rejection baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/verify-ghidra-psp-spike.mjs 2> "$RUNNER_TEMP/psp-results/psp-stderr.log" | tee "$RUNNER_TEMP/psp-results/psp-report.json"
+      - name: Existing generic LE and BE MIPS public CLI/MCP verification with extension installed
+        if: ${{ !cancelled() && steps.psp-tools.outcome != 'failure' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${GHIDRA_INSTALL_DIR:-}"
+          node scripts/verify-real-ghidra-mips.mjs 2>&1 | tee "$RUNNER_TEMP/psp-results/generic-mips.log"
+      - name: Preserve compact diagnostics and confirm source unchanged
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/psp-results/logs"
+          ps -eo pid,ppid,stat > "$RUNNER_TEMP/psp-results/processes.txt"
+          git status --short > "$RUNNER_TEMP/psp-results/git-status.txt"
+          if test -d "$RUNNER_TEMP/psp-runtime"; then
+            find "$RUNNER_TEMP/psp-runtime" -type f -name '*.log' -size -2M -exec cp --parents '{}' "$RUNNER_TEMP/psp-results/logs/" \;
+          fi
+          git diff --exit-code
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: psp-compatibility-442bb1e
+          path: ${{ runner.temp }}/psp-results/
+          if-no-files-found: error
+          retention-days: 3
