@@ -395,103 +395,120 @@ try {
         fixture.sha256,
         "Analysis modified the source executable",
       );
-      // Carved firmware keeps all program headers/load bytes but loses sections.
-      const read16 = (offset) =>
-        byteOrder === "little"
-          ? sourceBytes.readUInt16LE(offset)
-          : sourceBytes.readUInt16BE(offset);
-      const read32 = (offset) =>
-        byteOrder === "little"
-          ? sourceBytes.readUInt32LE(offset)
-          : sourceBytes.readUInt32BE(offset);
-      const sectionOffset = read32(32);
-      const cut = sectionOffset - 1;
-      const programOffset = read32(28);
-      const programCount = read16(44);
-      assert.equal(read16(42), 32);
-      assert.ok(cut >= programOffset + programCount * 32);
-      for (let i = 0; i < programCount; i += 1) {
-        const offset = programOffset + i * 32;
-        assert.ok(read32(offset + 4) + read32(offset + 16) <= cut);
-      }
-      const carvedBytes = sourceBytes.subarray(0, cut);
-      const carvedPath = join(workspace, `${byteOrder}-carved.elf`);
-      const carvedSha256 = createHash("sha256")
-        .update(carvedBytes)
-        .digest("hex");
-      await writeFile(carvedPath, carvedBytes);
-      const carvedResolved = await parseBinaryTarget(carvedPath);
-      if (!carvedResolved.ok) throw carvedResolved.error;
-      assert.deepEqual(
-        carvedResolved.value.mips.abiFlags,
-        independent.mips.abiFlags,
-      );
-      assert.match(
-        carvedResolved.value.mips.limitations.join(" "),
-        /section header table/u,
-      );
-      const carvedTarget = await call("open_binary", {
-        path: carvedPath,
-        provider_id: "ghidra",
-      });
-      assert.equal(carvedTarget.sha256, carvedSha256);
-      const carvedImage = await call("inspect_native_load_image");
-      assertMipsLoadedImage(carvedImage.observations, byteOrder, carvedSha256);
-      const carvedProcedures = await call("list_procedures");
-      assert.ok(
-        carvedProcedures.some(
-          (p) =>
-            BigInt(p.address) === BigInt(independent.symbols.rea_mips_entry),
-        ),
-      );
-      const carvedDossier = functionDossierSchema.parse(
-        await call("analyze_function", {
-          procedure: independent.symbols.rea_mips_entry,
-        }),
-      );
-      assert.ok(carvedDossier.pseudocode.trim().length > 0);
-      const carvedSnapshotPath = join(
-        workspace,
-        `${byteOrder}-carved.snapshot.json`,
-      );
-      await call("close_binary", { snapshot_path: carvedSnapshotPath });
-      const carvedSnapshot = parseAnalysisSnapshot(
-        JSON.parse(await readFile(carvedSnapshotPath, "utf8")),
-      );
-      assert.equal(carvedSnapshot.target.sha256, carvedSha256);
-      assert.ok(
-        carvedSnapshot.evidence_bundle.records.some((record) =>
-          parseEvidence(record).limitations.some((item) =>
+      // This upstream carved-firmware proof is specific to the generic MIPS fixture.
+      // PSP keeps its independent Allegrex/A-B-A checks; carved PSP is not verified.
+      let carved;
+      if (!psp) {
+        // Carved firmware keeps all program headers/load bytes but loses sections.
+        const read16 = (offset) =>
+          byteOrder === "little"
+            ? sourceBytes.readUInt16LE(offset)
+            : sourceBytes.readUInt16BE(offset);
+        const read32 = (offset) =>
+          byteOrder === "little"
+            ? sourceBytes.readUInt32LE(offset)
+            : sourceBytes.readUInt32BE(offset);
+        const sectionOffset = read32(32);
+        const cut = sectionOffset - 1;
+        const programOffset = read32(28);
+        const programCount = read16(44);
+        assert.equal(read16(42), 32);
+        assert.ok(cut >= programOffset + programCount * 32);
+        for (let i = 0; i < programCount; i += 1) {
+          const offset = programOffset + i * 32;
+          assert.ok(read32(offset + 4) + read32(offset + 16) <= cut);
+        }
+        const carvedBytes = sourceBytes.subarray(0, cut);
+        const carvedPath = join(workspace, `${byteOrder}-carved.elf`);
+        const carvedSha256 = createHash("sha256")
+          .update(carvedBytes)
+          .digest("hex");
+        await writeFile(carvedPath, carvedBytes);
+        const carvedResolved = await parseBinaryTarget(carvedPath);
+        if (!carvedResolved.ok) throw carvedResolved.error;
+        assert.deepEqual(
+          carvedResolved.value.mips.abiFlags,
+          independent.mips.abiFlags,
+        );
+        assert.match(
+          carvedResolved.value.mips.limitations.join(" "),
+          /section header table/u,
+        );
+        const carvedTarget = await call("open_binary", {
+          path: carvedPath,
+          provider_id: "ghidra",
+        });
+        assert.equal(carvedTarget.sha256, carvedSha256);
+        const carvedImage = await call("inspect_native_load_image");
+        assertMipsLoadedImage(
+          carvedImage.observations,
+          byteOrder,
+          carvedSha256,
+        );
+        const carvedProcedures = await call("list_procedures");
+        assert.ok(
+          carvedProcedures.some(
+            (p) =>
+              BigInt(p.address) === BigInt(independent.symbols.rea_mips_entry),
+          ),
+        );
+        const carvedDossier = functionDossierSchema.parse(
+          await call("analyze_function", {
+            procedure: independent.symbols.rea_mips_entry,
+          }),
+        );
+        assert.ok(carvedDossier.pseudocode.trim().length > 0);
+        const carvedSnapshotPath = join(
+          workspace,
+          `${byteOrder}-carved.snapshot.json`,
+        );
+        await call("close_binary", { snapshot_path: carvedSnapshotPath });
+        const carvedSnapshot = parseAnalysisSnapshot(
+          JSON.parse(await readFile(carvedSnapshotPath, "utf8")),
+        );
+        assert.equal(carvedSnapshot.target.sha256, carvedSha256);
+        assert.ok(
+          carvedSnapshot.evidence_bundle.records.some((record) =>
+            parseEvidence(record).limitations.some((item) =>
+              item.includes("section header table"),
+            ),
+          ),
+        );
+        const carvedCli = await execute(
+          process.execPath,
+          [
+            entrypoint,
+            "function",
+            carvedPath,
+            independent.symbols.rea_mips_entry,
+            "--provider",
+            "ghidra",
+            "--json",
+          ],
+          { env, timeout: 240000, maxBuffer: 16 * 1024 * 1024 },
+        );
+        const carvedEvidence = parseEvidence(JSON.parse(carvedCli.stdout));
+        assert.equal(carvedEvidence.subject?.digest.sha256, carvedSha256);
+        assert.ok(
+          carvedEvidence.limitations.some((item) =>
             item.includes("section header table"),
           ),
-        ),
-      );
-      const carvedCli = await execute(
-        process.execPath,
-        [
-          entrypoint,
-          "function",
-          carvedPath,
-          independent.symbols.rea_mips_entry,
-          "--provider",
-          "ghidra",
-          "--json",
-        ],
-        { env, timeout: 240000, maxBuffer: 16 * 1024 * 1024 },
-      );
-      const carvedEvidence = parseEvidence(JSON.parse(carvedCli.stdout));
-      assert.equal(carvedEvidence.subject?.digest.sha256, carvedSha256);
-      assert.ok(
-        carvedEvidence.limitations.some((item) =>
-          item.includes("section header table"),
-        ),
-      );
-      assert.equal(
-        functionDossierSchema.parse(carvedEvidence.normalized_result).procedure
-          .address,
-        carvedDossier.procedure.address,
-      );
-      assert.deepEqual(await readFile(carvedPath), carvedBytes);
+        );
+        assert.equal(
+          functionDossierSchema.parse(carvedEvidence.normalized_result)
+            .procedure.address,
+          carvedDossier.procedure.address,
+        );
+        assert.deepEqual(await readFile(carvedPath), carvedBytes);
+        carved = {
+          sha256: carvedSha256,
+          source_bytes: carvedBytes.length,
+          section_header_offset: sectionOffset,
+          effective_language: carvedImage.observations.language_id,
+          limitations: carvedResolved.value.mips.limitations,
+          procedures: carvedProcedures.length,
+        };
+      }
       reports.push({
         ...fixture,
         independent_reader: independent,
@@ -508,13 +525,10 @@ try {
           "CLI/MCP and snapshot identity",
         ],
         procedures: procedures.length,
-        carved: {
-          sha256: carvedSha256,
-          source_bytes: carvedBytes.length,
-          section_header_offset: sectionOffset,
-          effective_language: carvedImage.observations.language_id,
-          limitations: carvedResolved.value.mips.limitations,
-          procedures: carvedProcedures.length,
+        carved: carved ?? {
+          status: "not_run",
+          reason:
+            "Carved-firmware verification covers generic MIPS fixtures; carved PSP coverage is not established.",
         },
         status: "passed",
       });
