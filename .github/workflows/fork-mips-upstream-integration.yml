@@ -1,0 +1,217 @@
+name: Fork MIPS upstream integration
+
+on:
+  push:
+    branches: [ci/mips-upstream-integration]
+    paths: [.github/workflows/fork-mips-upstream-integration.yml]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fork-mips-upstream-integration
+  cancel-in-progress: true
+
+env:
+  HUSKY: "0"
+  TURBO_TELEMETRY_DISABLED: "1"
+  FEATURE_SHA: adf1cda29859ffcc063f40418b8ba39a0eac4fab
+  UPSTREAM_SHA: 8550913cda311e5340cf012b9c4afd622e36e35b
+  INTEGRATION_BRANCH: integration/mips-upstream-8550913
+
+jobs:
+  prepare:
+    if: github.repository == 'jaelliot/rea'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    permissions:
+      contents: write
+    outputs:
+      source_sha: ${{ steps.merge.outputs.source_sha }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: adf1cda29859ffcc063f40418b8ba39a0eac4fab
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Prepare a real merge without rewriting the contribution
+        id: merge
+        shell: bash
+        env:
+          PUSH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/integration"
+          test "$(git rev-parse HEAD)" = "$FEATURE_SHA"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git config core.hooksPath /dev/null
+          git fetch --no-tags https://github.com/morluto/rea.git "$UPSTREAM_SHA"
+          test "$(git rev-parse FETCH_HEAD)" = "$UPSTREAM_SHA"
+          ORIGINAL_BASE=$(git merge-base "$FEATURE_SHA" "$UPSTREAM_SHA")
+          printf 'feature=%s\nupstream=%s\noriginal_base=%s\n' "$FEATURE_SHA" "$UPSTREAM_SHA" "$ORIGINAL_BASE" | tee "$RUNNER_TEMP/integration/inputs.txt"
+          git log --oneline "$ORIGINAL_BASE..$UPSTREAM_SHA" > "$RUNNER_TEMP/integration/upstream-commits.txt"
+          git diff --name-only "$ORIGINAL_BASE" "$FEATURE_SHA" | sort > "$RUNNER_TEMP/integration/contribution-paths.txt"
+          git diff --name-only "$ORIGINAL_BASE" "$UPSTREAM_SHA" | sort > "$RUNNER_TEMP/integration/upstream-paths.txt"
+          comm -12 "$RUNNER_TEMP/integration/contribution-paths.txt" "$RUNNER_TEMP/integration/upstream-paths.txt" | tee "$RUNNER_TEMP/integration/overlapping-paths.txt"
+          if ! git merge --no-ff --no-commit "$UPSTREAM_SHA" > "$RUNNER_TEMP/integration/merge.log" 2>&1; then
+            cat "$RUNNER_TEMP/integration/merge.log"
+            git diff --name-only --diff-filter=U | tee "$RUNNER_TEMP/integration/conflicts.txt"
+            git diff > "$RUNNER_TEMP/integration/conflicts.diff"
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/integration/merge.log"
+          git diff --cached --check
+          git commit -m 'chore: integrate upstream 8550913 into the bounded MIPS contribution' -m "Merge upstream $UPSTREAM_SHA into tested MIPS head $FEATURE_SHA. Preserve both histories; no conflict-resolution overrides, feature expansion or PSP changes. Validation is recorded separately against the resulting commit."
+          test "$(git rev-parse HEAD^1)" = "$FEATURE_SHA"
+          test "$(git rev-parse HEAD^2)" = "$UPSTREAM_SHA"
+          if git ls-remote --exit-code origin "refs/heads/$INTEGRATION_BRANCH" > "$RUNNER_TEMP/integration/existing-ref.txt"; then
+            git fetch --no-tags origin "refs/heads/$INTEGRATION_BRANCH"
+            EXISTING=$(git rev-parse FETCH_HEAD)
+            test "$(git rev-parse "$EXISTING^1")" = "$FEATURE_SHA"
+            test "$(git rev-parse "$EXISTING^2")" = "$UPSTREAM_SHA"
+            test "$(git rev-parse "$EXISTING^{tree}")" = "$(git rev-parse 'HEAD^{tree}')"
+            git switch --detach "$EXISTING"
+          else
+            status=$?
+            test "$status" = 2
+            AUTH=$(printf 'x-access-token:%s' "$PUSH_TOKEN" | base64 -w0)
+            git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $AUTH" push origin "HEAD:refs/heads/$INTEGRATION_BRANCH"
+            unset AUTH
+          fi
+          SOURCE_SHA=$(git rev-parse HEAD)
+          test "$(git ls-remote origin "refs/heads/$INTEGRATION_BRANCH" | cut -f1)" = "$SOURCE_SHA"
+          echo "source_sha=$SOURCE_SHA" >> "$GITHUB_OUTPUT"
+          git show --no-patch --format=fuller HEAD | tee "$RUNNER_TEMP/integration/commit.txt"
+          git diff --stat "$UPSTREAM_SHA" HEAD | tee "$RUNNER_TEMP/integration/contribution-stat.txt"
+          git diff "$UPSTREAM_SHA" HEAD > "$RUNNER_TEMP/integration/contribution.diff"
+          git archive --format=tar.gz HEAD > "$RUNNER_TEMP/integration/source.tar.gz"
+          echo "Prepared source: $SOURCE_SHA" >> "$GITHUB_STEP_SUMMARY"
+          echo "Upstream base: $UPSTREAM_SHA" >> "$GITHUB_STEP_SUMMARY"
+          echo 'Only the temporary integration branch was written. Feature branch and main are unchanged.' >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: mips-upstream-merge
+          path: ${{ runner.temp }}/integration/
+          if-no-files-found: error
+          retention-days: 3
+
+  deterministic:
+    needs: prepare
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ needs.prepare.outputs.source_sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Locked dependencies and exact source
+        env:
+          SOURCE_SHA: ${{ needs.prepare.outputs.source_sha }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/results"
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          git rev-parse HEAD | tee "$RUNNER_TEMP/results/source-sha.txt"
+          node --version
+          npm --version
+          npm ci
+      - name: Focused MIPS and affected production-boundary tests
+        run: |
+          set -euo pipefail
+          npm run test:focused -- src/domain/binaryTarget.mips.test.ts src/ghidra/GhidraMipsProfile.test.ts src/ghidra/GhidraProvider.behavior.test.ts src/hopper/HopperMachOImage.test.ts tests/boundary/filesystem/mipsAbiFlags.test.ts tests/composition/analysis-sessions/mips-identity.test.ts tests/conformance/ghidra/mips-checks.test.ts 2>&1 | tee "$RUNNER_TEMP/results/focused.log"
+      - name: Unchanged repository gates and generated contracts
+        run: |
+          set -euo pipefail
+          npm run check:ci 2>&1 | tee "$RUNNER_TEMP/results/static.log"
+          npm run verify:test-discovery 2>&1 | tee "$RUNNER_TEMP/results/discovery.log"
+          npm run docs:check 2>&1 | tee "$RUNNER_TEMP/results/docs.log"
+      - name: Complete actual Vitest suite with normal coverage gates
+        run: |
+          set -euo pipefail
+          npm run test:coverage -- --reporter=default --reporter=json --outputFile.json="$RUNNER_TEMP/results/test-results.json" 2>&1 | tee "$RUNNER_TEMP/results/full-tests.log"
+      - name: Confirm tracked source unchanged
+        if: always()
+        run: |
+          mkdir -p "$RUNNER_TEMP/results"
+          git status --short | tee "$RUNNER_TEMP/results/git-status.txt"
+          git diff --exit-code
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: mips-upstream-deterministic
+          path: ${{ runner.temp }}/results/
+          if-no-files-found: error
+          retention-days: 3
+
+  real-ghidra:
+    needs: prepare
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ needs.prepare.outputs.source_sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Locked source and build
+        env:
+          SOURCE_SHA: ${{ needs.prepare.outputs.source_sha }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/results" "$RUNNER_TEMP/mips-native-tmp"
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          git rev-parse HEAD | tee "$RUNNER_TEMP/results/source-sha.txt"
+          node --version
+          npm --version
+          npm ci
+          npm run build:cached
+      - name: Install pinned Ghidra only into the disposable runner
+        run: |
+          set -euo pipefail
+          test -n "${JAVA_HOME_21_X64:-}"
+          echo "JAVA_HOME=$JAVA_HOME_21_X64" >> "$GITHUB_ENV"
+          "$JAVA_HOME_21_X64/bin/java" -version 2>&1 | tee "$RUNNER_TEMP/results/java.txt"
+          sudo apt-get update -qq
+          sudo apt-get install --no-install-recommends -y clang-18 lld-18 binutils
+          echo 'REA_MIPS_CLANG=clang-18' >> "$GITHUB_ENV"
+          echo '/usr/lib/llvm-18/bin' >> "$GITHUB_PATH"
+          clang-18 --version | tee "$RUNNER_TEMP/results/clang.txt"
+          /usr/lib/llvm-18/bin/ld.lld --version | tee "$RUNNER_TEMP/results/lld.txt"
+          readelf --version | tee "$RUNNER_TEMP/results/readelf.txt"
+          curl --fail --location --retry 2 --max-time 180 'https://github.com/NationalSecurityAgency/ghidra/releases/download/Ghidra_12.1.4_build/ghidra_12.1.4_PUBLIC_20260921.zip' -o "$RUNNER_TEMP/ghidra.zip"
+          echo "ddac49f903da9d5bac833e5cc79395098b9c33cfd3279be5f31bd00387d2d4db  $RUNNER_TEMP/ghidra.zip" | sha256sum --check
+          unzip -q "$RUNNER_TEMP/ghidra.zip" -d "$RUNNER_TEMP/ghidra"
+          GHIDRA_DIR="$RUNNER_TEMP/ghidra/ghidra_12.1.4_PUBLIC"
+          test -x "$GHIDRA_DIR/support/analyzeHeadless"
+          echo "GHIDRA_INSTALL_DIR=$GHIDRA_DIR" >> "$GITHUB_ENV"
+          echo "TMPDIR=$RUNNER_TEMP/mips-native-tmp" >> "$GITHUB_ENV"
+      - name: Real little-endian and big-endian MIPS through public CLI and MCP
+        run: |
+          set -euo pipefail
+          npm run verify:ghidra:mips 2>&1 | tee "$RUNNER_TEMP/results/real-ghidra.log"
+      - name: Preserve compact diagnostics
+        if: always()
+        run: |
+          mkdir -p "$RUNNER_TEMP/results/logs"
+          git status --short > "$RUNNER_TEMP/results/git-status.txt"
+          ps -eo pid,ppid,stat > "$RUNNER_TEMP/results/processes.txt"
+          if test -d "$RUNNER_TEMP/mips-native-tmp"; then
+            find "$RUNNER_TEMP/mips-native-tmp" -type f -name '*.log' -size -2M -exec cp --parents '{}' "$RUNNER_TEMP/results/logs/" \;
+          fi
+          git diff --exit-code
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: mips-upstream-real-ghidra
+          path: ${{ runner.temp }}/results/
+          if-no-files-found: error
+          retention-days: 3
