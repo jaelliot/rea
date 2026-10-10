@@ -46,7 +46,7 @@ jobs:
           s = p.read_text()
           start_marker = '      // Carved firmware keeps all program headers/load bytes but loses sections.\n'
           end_marker = '      reports.push({\n'
-          assert s.count(start_marker) == s.count(end_marker) == 1
+          assert s.count(start_marker) == 1, 'Expected one carved-firmware block'
           start = s.index(start_marker)
           end = s.index(end_marker, start)
           block = s[start:end]
