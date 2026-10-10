@@ -1,0 +1,156 @@
+name: Fork MIPS upstream synchronization
+
+on:
+  push:
+    branches: [ci/mips-upstream-sync]
+    paths: [.github/workflows/fork-mips-upstream-sync.yml]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fork-mips-upstream-sync
+  cancel-in-progress: false
+
+env:
+  FEATURE_SHA: adf1cda29859ffcc063f40418b8ba39a0eac4fab
+  UPSTREAM_SHA: 81cdafc132c7ba3bd6e12b1169f9e3687025d07b
+  INTEGRATION_BRANCH: integration/mips-upstream-81cdafc
+  HUSKY: "0"
+  TURBO_TELEMETRY_DISABLED: "1"
+
+jobs:
+  prepare:
+    if: github.repository == 'jaelliot/rea'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    permissions:
+      contents: write
+    outputs:
+      source_sha: ${{ steps.integrate.outputs.source_sha }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: adf1cda29859ffcc063f40418b8ba39a0eac4fab
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Prepare a normal integration commit; never update main or merge a PR
+        id: integrate
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$FEATURE_SHA"
+          git config --local core.hooksPath /dev/null
+          git config --local user.name 'github-actions[bot]'
+          git config --local user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git fetch --no-tags https://github.com/morluto/rea.git "$UPSTREAM_SHA"
+          test "$(git rev-parse FETCH_HEAD)" = "$UPSTREAM_SHA"
+          git switch -c "$INTEGRATION_BRANCH"
+          git merge --no-ff "$UPSTREAM_SHA" -m "chore: synchronize MIPS contribution with upstream 81cdafc"
+          test "$(git rev-parse HEAD^1)" = "$FEATURE_SHA"
+          test "$(git rev-parse HEAD^2)" = "$UPSTREAM_SHA"
+          git diff --check "$UPSTREAM_SHA" HEAD
+          mkdir -p "$RUNNER_TEMP/mips-sync"
+          git show -s --format=fuller HEAD | tee "$RUNNER_TEMP/mips-sync/commit.txt"
+          git diff --stat "$UPSTREAM_SHA" HEAD | tee "$RUNNER_TEMP/mips-sync/contribution-stat.txt"
+          git diff --binary "$UPSTREAM_SHA" HEAD > "$RUNNER_TEMP/mips-sync/contribution.patch"
+          echo "source_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "source_tree=$(git rev-parse 'HEAD^{tree}')" >> "$GITHUB_OUTPUT"
+          printf 'SOURCE_SHA=%s\nSOURCE_TREE=%s\n' "$(git rev-parse HEAD)" "$(git rev-parse 'HEAD^{tree}')"
+      - name: Publish only the temporary integration branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$INTEGRATION_BRANCH" in integration/mips-upstream-81cdafc) ;; *) exit 1;; esac
+          existing=$(git ls-remote https://github.com/jaelliot/rea.git "refs/heads/$INTEGRATION_BRANCH" | cut -f1)
+          if test -n "$existing"; then
+            echo 'Integration destination already exists; refusing to overwrite it.' >&2
+            exit 1
+          fi
+          git -c 'credential.helper=!f() { echo username=x-access-token; echo "password=$GH_TOKEN"; }; f' push https://github.com/jaelliot/rea.git "HEAD:refs/heads/$INTEGRATION_BRANCH"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: mips-sync-preparation
+          path: ${{ runner.temp }}/mips-sync/
+          retention-days: 7
+
+  verify:
+    needs: prepare
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ needs.prepare.outputs.source_sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Locked source and build
+        env:
+          EXPECTED_SHA: ${{ needs.prepare.outputs.source_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/mips-result" "$RUNNER_TEMP/mips-native-tmp"
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          git rev-parse HEAD | tee "$RUNNER_TEMP/mips-result/source-sha.txt"
+          node --version
+          npm --version
+          npm ci
+          npm run build:cached
+      - name: Focused actual tests and all current static gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run test:focused -- src/domain/binaryTarget.mips.test.ts src/ghidra/GhidraMipsProfile.test.ts src/ghidra/GhidraProvider.behavior.test.ts src/hopper/HopperMachOImage.test.ts tests/boundary/filesystem/mipsAbiFlags.test.ts tests/composition/analysis-sessions/mips-identity.test.ts tests/conformance/ghidra/mips-checks.test.ts 2>&1 | tee "$RUNNER_TEMP/mips-result/focused.log"
+          npm run check:ci 2>&1 | tee "$RUNNER_TEMP/mips-result/check-ci.log"
+          npm run verify:test-discovery 2>&1 | tee "$RUNNER_TEMP/mips-result/discovery.log"
+          npm run docs:check 2>&1 | tee "$RUNNER_TEMP/mips-result/docs-check.log"
+      - name: Provision only this disposable verification runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${JAVA_HOME_21_X64:-}"
+          echo "JAVA_HOME=$JAVA_HOME_21_X64" >> "$GITHUB_ENV"
+          "$JAVA_HOME_21_X64/bin/java" -version 2>&1 | tee "$RUNNER_TEMP/mips-result/java.txt"
+          sudo apt-get update -qq
+          sudo apt-get install --no-install-recommends -y clang-18 lld-18 binutils
+          echo "REA_MIPS_CLANG=clang-18" >> "$GITHUB_ENV"
+          echo '/usr/lib/llvm-18/bin' >> "$GITHUB_PATH"
+          clang-18 --version | tee "$RUNNER_TEMP/mips-result/clang.txt"
+          ld.lld-18 --version | tee "$RUNNER_TEMP/mips-result/lld.txt"
+          readelf --version | tee "$RUNNER_TEMP/mips-result/readelf.txt"
+          curl --fail --location --retry 2 --max-time 180 'https://github.com/NationalSecurityAgency/ghidra/releases/download/Ghidra_12.1.4_build/ghidra_12.1.4_PUBLIC_20260921.zip' -o "$RUNNER_TEMP/ghidra.zip"
+          echo "ddac49f903da9d5bac833e5cc79395098b9c33cfd3279be5f31bd00387d2d4db  $RUNNER_TEMP/ghidra.zip" | sha256sum --check
+          unzip -q "$RUNNER_TEMP/ghidra.zip" -d "$RUNNER_TEMP/ghidra"
+          GHIDRA_DIR="$RUNNER_TEMP/ghidra/ghidra_12.1.4_PUBLIC"
+          test -x "$GHIDRA_DIR/support/analyzeHeadless"
+          echo "GHIDRA_INSTALL_DIR=$GHIDRA_DIR" >> "$GITHUB_ENV"
+          echo "TMPDIR=$RUNNER_TEMP/mips-native-tmp" >> "$GITHUB_ENV"
+      - name: Real MIPS little-endian and big-endian public CLI and MCP
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/verify-real-ghidra-mips.mjs 2>&1 | tee "$RUNNER_TEMP/mips-result/real-ghidra.log"
+          git diff --exit-code
+      - name: Preserve bounded diagnostics
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/mips-result"
+          git status --short > "$RUNNER_TEMP/mips-result/git-status.txt"
+          ps -eo pid,ppid,stat > "$RUNNER_TEMP/mips-result/processes.txt"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: mips-sync-validation
+          path: ${{ runner.temp }}/mips-result/
+          if-no-files-found: error
+          retention-days: 7
