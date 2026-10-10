@@ -6,12 +6,12 @@ on:
     paths: [.github/workflows/fork-psp-abi-finalize.yml]
 
 permissions:
-  contents: write
+  contents: read
 
 env:
   HUSKY: "0"
   TURBO_TELEMETRY_DISABLED: "1"
-  SOURCE_SHA: e52576acc64a98f70cf8069e58b5a22a388fc968
+  SOURCE_SHA: 35fe387cae12fa1f2837e65b78067a06f8dc63ff
 
 jobs:
   verify:
@@ -21,89 +21,20 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: e52576acc64a98f70cf8069e58b5a22a388fc968
+          ref: 35fe387cae12fa1f2837e65b78067a06f8dc63ff
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version-file: .nvmrc
           cache: npm
-      - name: Complete scoped test structure and actual snapshot-profile assertion
+      - name: Pinned source, build, and existing static gates
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
           mkdir -p "$RUNNER_TEMP/psp-results" "$RUNNER_TEMP/psp-runtime"
-          python - <<'PY'
-          from pathlib import Path
-          def replace(path, old, new):
-              p = Path(path)
-              s = p.read_text()
-              assert s.count(old) == 1, (path, old)
-              p.write_text(s.replace(old, new))
-          path = 'tests/boundary/filesystem/ghidraPspExtension.test.ts'
-          for title, group in [
-              ('retains independently inspected PSP ABI bytes through the real target reader', 'PSP inspected ABI declaration boundary'),
-              ('forces the PSP loader/language only for the selected profile', 'PSP explicit loader boundary'),
-          ]:
-              old = '    it("' + title + '"'
-              new = '  },\n);\n\ndescribe.skipIf(process.platform === "win32")(\n  "' + group + '",\n  () => {\n' + old
-              replace(path, old, new)
-          path = 'scripts/verify-real-ghidra-mips.mjs'
-          replace(path, '''      assert.deepEqual(
-                  snapshot.target.mips,
-                  independent.mips,
-                  "Snapshot did not retain the independently inspected target ABI",
-                );
-                assert.equal(
-                  snapshot.binding.analysis_profile.parameters.mips_elf.byte_order,
-                  byteOrder,
-                );''', '''      const abi = independent.mips.abiFlags;
-                assert.deepEqual(
-                  snapshot.binding.analysis_profile.parameters.mips_elf,
-                  {
-                    elf_class: independent.mips.elfClass,
-                    byte_order: independent.mips.byteOrder,
-                    type: independent.mips.type,
-                    flags: independent.mips.flags,
-                    abi_flags: {
-                      version: abi.version,
-                      isa_level: abi.isaLevel,
-                      isa_revision: abi.isaRevision,
-                      gpr_size: abi.gprSize,
-                      cpr1_size: abi.cpr1Size,
-                      cpr2_size: abi.cpr2Size,
-                      fp_abi: abi.fpAbi,
-                      isa_extension: abi.isaExtension,
-                      ases: abi.ases,
-                      flags1: abi.flags1,
-                      flags2: abi.flags2,
-                    },
-                  },
-                  "Snapshot profile did not retain the independently inspected ELF/ABI declaration",
-                );''')
-          PY
-          npm ci
-          npm exec oxfmt -- --write tests/boundary/filesystem/ghidraPspExtension.test.ts scripts/verify-real-ghidra-mips.mjs
-          node --check scripts/verify-real-ghidra-mips.mjs
-          git diff --check
-          git add -- tests/boundary/filesystem/ghidraPspExtension.test.ts scripts/verify-real-ghidra-mips.mjs
-          git diff --cached > "$RUNNER_TEMP/psp-results/finalize.patch"
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git commit -m 'test(ghidra): bind PSP ABI verification to snapshot profiles'
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
           git rev-parse HEAD | tee "$RUNNER_TEMP/psp-results/source-sha.txt"
-      - name: Advance only isolated candidate with expected-head check
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          test "$(git ls-remote --heads origin fix/psp-abi-record-validation | cut -f1)" = "$SOURCE_SHA"
-          git -c credential.helper='!gh auth git-credential' push origin HEAD:refs/heads/fix/psp-abi-record-validation
-      - name: Build and existing static gates
-        shell: bash
-        run: |
-          set -euo pipefail
+          npm ci
           npm run build:cached 2>&1 | tee "$RUNNER_TEMP/psp-results/build.log"
           npm run check:ci 2>&1 | tee "$RUNNER_TEMP/psp-results/check-ci.log"
       - name: Actual affected suites and documentation gates
