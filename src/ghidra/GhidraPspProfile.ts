@@ -29,8 +29,26 @@ export const ghidraProcessorUnsupportedReason = (
   // unknown producer flags or treat this as proof of instruction semantics.
   if (metadata.flags !== 0x10a23001)
     return "The PSP Allegrex profile requires the verified PSPSDK ELF declaration 0x10a23001; other ISA/ABI/ASE flags are not inferred.";
-  if (metadata.abiFlags !== undefined && metadata.abiFlags !== null)
-    return "PSP ELF with a separate MIPS ABI flags record requires verification of that record; the initial PSPSDK profile has no such declaration.";
+  const abi = metadata.abiFlags;
+  if (abi === undefined || abi === null)
+    return "The PSP Allegrex profile requires an inspected separate MIPS ABI flags record; missing declarations are not inferred.";
+  // PSPDEV v20261001: GNU readelf 2.44 and the 24-byte record agree on
+  // MIPS II, 32-bit registers, single-precision hard float and flags1=1.
+  // This is a bounded producer declaration, not a claim about VFPU semantics.
+  if (
+    abi.version !== 0 ||
+    abi.isaLevel !== 2 ||
+    abi.isaRevision !== 0 ||
+    abi.gprSize !== 1 ||
+    abi.cpr1Size !== 1 ||
+    abi.cpr2Size !== 0 ||
+    abi.fpAbi !== 2 ||
+    abi.isaExtension !== 0 ||
+    abi.ases !== 0 ||
+    abi.flags1 !== 1 ||
+    abi.flags2 !== 0
+  )
+    return "The separate MIPS ABI flags record does not match the verified PSP MIPS-II/32-bit/single-float declaration; other versions, register modes and extension flags require separate verification.";
   return null;
 };
 

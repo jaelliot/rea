@@ -88,7 +88,11 @@ try {
     if (!resolved.ok) throw resolved.error;
     if (psp) {
       assert.equal(resolved.value.mips.flags, 0x10a23001);
-      assert.equal(resolved.value.mips.abiFlags, null);
+      assert.deepEqual(
+        resolved.value.mips,
+        independent.mips,
+        "REA PSP ELF/ABI interpretation disagrees with GNU readelf and raw ABI bytes",
+      );
     } else {
       assert.deepEqual(
         resolved.value.mips,
@@ -262,6 +266,11 @@ try {
         JSON.parse(await readFile(snapshotPath, "utf8")),
       );
       assert.equal(snapshot.target.architecture, "mips");
+      assert.deepEqual(
+        snapshot.target.mips,
+        independent.mips,
+        "Snapshot did not retain the independently inspected target ABI",
+      );
       assert.equal(
         snapshot.binding.analysis_profile.parameters.mips_elf.byte_order,
         byteOrder,

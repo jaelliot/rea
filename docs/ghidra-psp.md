@@ -11,9 +11,14 @@ PSP loading and calling conventions remain owned by
 The initial profile is limited to Linux x64, little-endian ELF32 `ET_EXEC`,
 `EM_MIPS` and the PSPSDK declaration `e_flags=0x10a23001`. Those bits declare
 MIPS II, Allegrex, EABI32 and NOREORDER; they are not proof of every instruction's
-semantics. A separate `.MIPS.abiflags` record is not present in the source-owned
-PSPSDK fixture; targets declaring one require separate verification and are
-refused rather than forced through the generic MIPS32r2/o32 policy.
+semantics. The profile also requires an inspected version-0 MIPS ABI flags
+record declaring ISA level 2/revision 0, 32-bit GPR and CPR1, no CPR2,
+single-precision hard float (`fpAbi=2`), no ISA extension or ASEs,
+`flags1=1` and `flags2=0`. These are the declarations independently reported by
+PSPDEV v20261001's GNU readelf 2.44 and its 24-byte section dump. Missing,
+uninspected, contradictory and other producer declarations are refused.
+The PSP profile is not an exception to the generic MIPS32r2/o32 policy; that
+separate gate is unchanged. Profile revision v2 records this corrected boundary.
 
 PRX, relocatable/shared images, PBP/ISO/CSO containers, runtime emulation and live
 code overlays are outside this first profile. Other hosts and flag combinations
@@ -81,8 +86,10 @@ npm run verify:ghidra:mips
 ```
 
 The maintained PSP fixture builds from `tests/conformance/psp/`, never executes,
-and is independent of commercial game data. PSP GNU tools supply symbol and
-encoding observations; public CLI/MCP must recover known functions, a direct
+and is independent of commercial game data. PSP GNU tools supply ELF/ABI,
+raw ABI-record, symbol and encoding observations; REA's parsed target and saved
+snapshot must agree with the independent ABI declaration. Public CLI/MCP must
+recover known functions, a direct
 call, the immediate `0x1234`, BITREV, a global word and a marker. The verifier
 checks observed loader/language, original bytes, Evidence, snapshot reopening,
 and an A-B-A target switch with different global contents at the same address.
