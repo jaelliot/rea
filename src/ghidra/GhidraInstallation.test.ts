@@ -569,6 +569,35 @@ describe("Ghidra FAT native decompiler admission", () => {
 
 describe("Ghidra native decompiler admission", () => {
   it.each([
+    { name: "little-endian", encoding: 1 },
+    { name: "big-endian", encoding: 2 },
+  ])("rejects a $name MIPS target as a host decompiler", ({ encoding }) => {
+    const bytes = elf(1, encoding, 8);
+    const result = inspectGhidraInstallation(
+      {
+        environment: {},
+        installDir: INSTALL,
+        platform: "linux",
+        architecture: "x64",
+      },
+      host({
+        executableHeader: (path: string) =>
+          path === LINUX_DECOMPILER ? { bytes, size: bytes.length } : undefined,
+      }),
+    );
+    expect(result.status).toBe("unavailable");
+    expect(
+      result.checks.find(({ name }) => name === "native_decompiler"),
+    ).toMatchObject({
+      status: "failed",
+      code: "executable_missing",
+      detail: expect.stringContaining(
+        "reports elf mips, but linux/x64 requires elf x86_64",
+      ),
+    });
+  });
+
+  it.each([
     {
       name: "a Linux x86-64 decompiler at the macOS arm64 path",
       options: {
