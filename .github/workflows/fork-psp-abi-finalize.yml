@@ -11,7 +11,7 @@ permissions:
 env:
   HUSKY: "0"
   TURBO_TELEMETRY_DISABLED: "1"
-  SOURCE_SHA: 8e1d69bd41ad118c4dd434e8a2bdb60a9e25fc0c
+  SOURCE_SHA: 2619488261fdfd7d09b50195712ee8bd5ed84e77
   UPSTREAM_SHA: 926c2d6ba7975522d63a8dbb0d448f5b9d1514d4
   CANDIDATE_BRANCH: test/psp-upstream-926c2d6
 
@@ -19,52 +19,86 @@ jobs:
   verify:
     if: github.repository == 'jaelliot/rea'
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 20
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: 8e1d69bd41ad118c4dd434e8a2bdb60a9e25fc0c
+          ref: 2619488261fdfd7d09b50195712ee8bd5ed84e77
           fetch-depth: 0
           persist-credentials: false
-      - name: Integrate the exact upstream revision without automatic conflict resolution
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Scope the generic carved-firmware verifier to its own fixture family
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/psp-results" "$RUNNER_TEMP/psp-runtime"
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
           test -z "$(git status --porcelain)"
-          git fetch --no-tags https://github.com/morluto/rea.git "$UPSTREAM_SHA"
-          test "$(git rev-parse FETCH_HEAD)" = "$UPSTREAM_SHA"
+          git merge-base --is-ancestor "$UPSTREAM_SHA" HEAD
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('scripts/verify-real-ghidra-mips.mjs')
+          s = p.read_text()
+          start_marker = '      // Carved firmware keeps all program headers/load bytes but loses sections.\n'
+          end_marker = '      reports.push({\n'
+          assert s.count(start_marker) == s.count(end_marker) == 1
+          start = s.index(start_marker)
+          end = s.index(end_marker, start)
+          block = s[start:end]
+          assert 'assertMipsLoadedImage(carvedImage.observations, byteOrder, carvedSha256)' in block
+          assert 'independent.symbols.rea_mips_entry' in block
+          field_start = s.index('        carved: {\n', end)
+          field_end = s.index('        status: "passed",\n', field_start)
+          field = s[field_start:field_end]
+          assert field.endswith('        },\n')
+          assignment = field.replace('        carved: {\n', '        carved = {\n', 1)[:-2] + ';\n'
+          guarded = (
+              '      // This upstream carved-firmware proof is specific to the generic MIPS fixture.\n'
+              '      // PSP keeps its independent Allegrex/A-B-A checks; carved PSP is not verified.\n'
+              '      let carved;\n'
+              '      if (!psp) {\n'
+              + ''.join('  ' + line if line.strip() else line for line in block.splitlines(keepends=True))
+              + assignment + '      }\n'
+          )
+          replacement = (
+              '        carved: carved ?? {\n'
+              '          status: "not_run",\n'
+              '          reason: "Carved-firmware verification covers generic MIPS fixtures; carved PSP coverage is not established.",\n'
+              '        },\n'
+          )
+          assert s.count(field) == 1
+          p.write_text(s.replace(block, guarded, 1).replace(field, replacement, 1))
+          p = Path('docs/ghidra-psp.md')
+          s = p.read_text()
+          marker = 'The maintained PSP fixture builds from `tests/conformance/psp/`, never executes,\n'
+          assert s.count(marker) == 1
+          s = s.replace(marker, 'The generic verifier also exercises a section-truncated firmware fixture. That\ncheck uses generic MIPS symbols and language expectations and runs only in generic\nmode; the PSP report explicitly records carved-PSP coverage as not run.\n\n' + marker)
+          p.write_text(s)
+          PY
+          npm ci
+          npm exec oxfmt -- --write scripts/verify-real-ghidra-mips.mjs docs/ghidra-psp.md
+          node --check scripts/verify-real-ghidra-mips.mjs
+          git diff --check
+          git diff --exit-code -- src/
+          git diff > "$RUNNER_TEMP/psp-results/verifier-repair.patch"
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git merge --no-ff "$UPSTREAM_SHA" -m 'chore: synchronize PSP contribution with upstream 926c2d6' 2>&1 | tee "$RUNNER_TEMP/psp-results/merge.log"
-          git merge-base --is-ancestor "$SOURCE_SHA" HEAD
-          git merge-base --is-ancestor "$UPSTREAM_SHA" HEAD
+          git add -- scripts/verify-real-ghidra-mips.mjs docs/ghidra-psp.md
+          git commit -m 'test(ghidra): keep carved firmware checks scoped to generic MIPS fixtures'
           git rev-parse HEAD | tee "$RUNNER_TEMP/psp-results/source-sha.txt"
           git show --no-patch --format=raw HEAD > "$RUNNER_TEMP/psp-results/parents.txt"
-          git diff --stat "$UPSTREAM_SHA" HEAD | tee "$RUNNER_TEMP/psp-results/contribution-stat.txt"
-          git diff --check "$UPSTREAM_SHA" HEAD
-      - name: Publish only the isolated integration checkpoint
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          test -z "$(git ls-remote --heads origin "$CANDIDATE_BRANCH")"
-          git -c credential.helper='!gh auth git-credential' push origin "HEAD:refs/heads/$CANDIDATE_BRANCH"
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
-        with:
-          node-version-file: .nvmrc
-          cache: npm
+          git diff --stat "$UPSTREAM_SHA" HEAD > "$RUNNER_TEMP/psp-results/contribution-stat.txt"
       - name: Locked build and existing static gates
         shell: bash
         run: |
           set -euo pipefail
           node --version
           npm --version
-          npm ci
           npm run build:cached 2>&1 | tee "$RUNNER_TEMP/psp-results/build.log"
           npm run check:ci 2>&1 | tee "$RUNNER_TEMP/psp-results/check-ci.log"
       - name: PSP regressions and the previously failing integration areas
@@ -74,6 +108,14 @@ jobs:
           npm run test:focused -- tests/boundary/filesystem/ghidraPspExtension.test.ts tests/conformance/ghidra/psp-checks.test.ts tests/boundary/providers/ghidra/ghidraLauncher.test.ts src/domain/binaryTarget.mips.test.ts src/ghidra/GhidraMipsProfile.test.ts src/ghidra/GhidraProvider.behavior.test.ts src/hopper/HopperMachOImage.test.ts tests/boundary/filesystem/mipsAbiFlags.test.ts tests/composition/analysis-sessions/mips-identity.test.ts tests/conformance/ghidra/mips-checks.test.ts tests/boundary/evm/evmoleInterfaceProvider.test.ts tests/boundary/browser/cdpCleanupCancellation.test.ts tests/boundary/firmware/firmwareIntegration.test.ts tests/boundary/firmware/firmwareWorkspaceRecovery.test.ts tests/boundary/filesystem/qwenClientConfiguration.test.ts 2>&1 | tee "$RUNNER_TEMP/psp-results/focused.log"
           npm run verify:test-discovery 2>&1 | tee "$RUNNER_TEMP/psp-results/discovery.log"
           npm run docs:check 2>&1 | tee "$RUNNER_TEMP/psp-results/docs.log"
+      - name: Advance only the isolated candidate with expected-head check
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$(git ls-remote --heads origin "$CANDIDATE_BRANCH" | cut -f1)" = "$SOURCE_SHA"
+          git -c credential.helper='!gh auth git-credential' push origin "HEAD:refs/heads/$CANDIDATE_BRANCH"
       - name: Provision checksum-pinned verification tools
         shell: bash
         run: |
@@ -121,7 +163,7 @@ jobs:
         run: |
           set -euo pipefail
           node scripts/verify-real-ghidra-mips.mjs --psp 2>&1 | tee "$RUNNER_TEMP/psp-results/psp-public.log"
-      - name: Real generic LE and BE MIPS retain separate profiles
+      - name: Real generic LE and BE MIPS including carved-firmware checks
         if: ${{ !cancelled() && steps.extension_install.outcome == 'success' }}
         shell: bash
         run: |
