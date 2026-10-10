@@ -34,7 +34,7 @@ For this experiment the extension must be installed under
 `$GHIDRA_INSTALL_DIR/Ghidra/Extensions/ghidra-allegrex`. REA isolates its analysis
 home, so installation in the operator's home is not assumed to be visible. The
 verifier records extension metadata, language-definition and JAR digests; a
-missing installation produces `PSP_EXTENSION_UNAVAILABLE`. Presence is only a
+missing installation produces `PSP_EXTENSION_UNAVAILABLE`, Presence is only a
 preflight, not proof of compatibility: the real handshake and operations must
 also pass.
 
@@ -105,3 +105,52 @@ complete VFPU semantics and behavioral equivalence are outside this experiment.
 The extension documents VFPU decompilation limitations, including unmodeled
 prefix semantics; this integer fixture does not resolve them. See its
 [README](https://github.com/kotcrab/ghidra-allegrex/blob/v21.4/README.md).
+
+## Research-derived acceptance boundaries for the follow-on
+
+This source review informs the next product slice; it adds no implemented
+capability or passing runtime test. Keep the generic MIPS contribution bounded
+and do not make whole-game reconstruction a completion gate for #1330.
+
+Two relevant precedents are the [MHP2G module configuration](https://github.com/tclamb/mhp2g-decomp/blob/1d81fcb047e92bf0750c1735dd2eef2074606aff/configure.py)
+and [Yakumo's runtime/profile boundary](https://github.com/TeamGDB/Yakumo/blob/bbf8f09d8b7937c28ce546d686bdf93adfaf6bc2/docs/ARCHITECTURE.md).
+The former separates module sources, symbols and relocations; the latter
+invalidates generated functions when different code occupies an address range.
+These are different target projects, not evidence that REA implements either
+workflow. The portable lesson is that an address alone cannot identify code.
+
+Apply that lesson through existing REA contracts before introducing abstractions:
+
+- **Target/profile binding:** use two fresh source-owned static fixtures with
+  different bytes at the same procedure address. Open/query A, then B, then A;
+  inspect target hashes, observed instructions and Evidence identity. Returning
+  A's result for B is a failure. Reuse the existing session/snapshot verifiers;
+  add only missing cases. This tests target switching, not live overlay support.
+- **Representation boundary:** raw overlays, PRX relocation and simultaneous
+  base-plus-overlay views remain separate work. A refusal of an unsupported
+  representation must not become an analysis-success count. Do not manufacture
+  ELF headers, relabel generic MIPS as PSP, or add Monster Hunter load addresses
+  to get a positive test. Verify mappings only when an existing contract actually
+  accepts and reports them.
+- **Partial facts:** unknown indirect targets, types and unmodeled VFPU effects
+  must remain unknown. Nonempty pseudocode does not recover an entire function's
+  behavior. An observed processor/loader and a successful decompilation query
+  establish narrower facts than reconstruction or runtime equivalence.
+- **Independent expectations:** keep the controlled fixture and published-program
+  compatibility cases separate. Derive assertions from maintained source or
+  independently inspected bytes, not the decompiler output being judged. Freeze
+  a held-out target before tuning against it and report every limitation/failure.
+
+[ModKit's package boundary and source ancestry](https://github.com/MHFU-ModKit/modkit/blob/394f2a2328f5e1e27d849cdf22ee123ceacdf774/packages/mhp-formats/README.md)
+are another reason to avoid copying title-specific format code. Archive intake,
+address maps, hooks, PPSSPP state control and reconstruction/pattern-mining queues
+belong to callers or specialist projects. REA should provide the reusable
+inspection, identity, lifecycle and failure contracts that those workflows use.
+Related projects that share code or recovered symbols are not independent oracles.
+
+[Yakumo's synthetic archive regressions](https://github.com/TeamGDB/Yakumo/blob/bbf8f09d8b7937c28ce546d686bdf93adfaf6bc2/profiles/mhp3rd/tests/tool_security_tests.py)
+illustrate testing malformed inputs without game content. Reuse the failure-class
+idea at a boundary REA owns, not that project's extractor or gameplay runtime.
+These proposed additions need their own executable validation; the earlier
+compatibility run did not test them. No automatic installation, new provider,
+public tool, commercial fixture, or emulator integration is requested here.
