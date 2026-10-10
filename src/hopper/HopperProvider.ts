@@ -113,6 +113,13 @@ export class HopperProvider implements AnalysisProviderCandidate {
         reason: null,
         diagnostics,
       };
+    if (target.architecture === "mips")
+      return {
+        status: "unsupported",
+        code: "architecture_unsupported",
+        reason: "REA's Hopper adapter does not admit MIPS targets.",
+        diagnostics,
+      };
     if (target.format === "dos-mz" || target.format === "dos-com")
       return {
         status: "unsupported",
@@ -249,7 +256,8 @@ export class HopperProvider implements AnalysisProviderCandidate {
           ? {
               ok: true,
               value: createAnalysisExecution(mapped.value, executionProvider, {
-                rawResult: result.value,
+                // Only the file-offset mapping differs from Hopper's reply.
+                rawResult: mapped === result ? null : result.value,
                 ...(profile === undefined ? {} : { analysisProfile: profile }),
                 limitations: [
                   ...(preparedImage === undefined

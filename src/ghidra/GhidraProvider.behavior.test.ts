@@ -734,7 +734,7 @@ const sessionInfo = () => ({
 
 const executableTarget = (
   format: "mach-o" | "elf" | "pe",
-  architecture: NonNullable<BinaryTarget["architecture"]>,
+  architecture: Extract<BinaryTarget, { format: "pe" }>["architecture"],
 ): BinaryTarget =>
   format === "pe"
     ? peTarget(architecture)
@@ -748,7 +748,7 @@ const executableTarget = (
       };
 
 const peTarget = (
-  architecture: NonNullable<BinaryTarget["architecture"]>,
+  architecture: Extract<BinaryTarget, { format: "pe" }>["architecture"],
 ): Extract<BinaryTarget, { format: "pe" }> => ({
   path: "/tmp/fixture",
   sha256: "a".repeat(64),
