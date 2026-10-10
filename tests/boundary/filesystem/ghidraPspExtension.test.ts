@@ -289,7 +289,12 @@ describe.skipIf(process.platform === "win32")(
         expect(result.error._tag).toBe("AnalysisUnsupportedTargetError");
       },
     );
+  },
+);
 
+describe.skipIf(process.platform === "win32")(
+  "PSP inspected ABI declaration boundary",
+  () => {
     it("retains independently inspected PSP ABI bytes through the real target reader", async () => {
       const { directory, provider } = await installation();
       const abiOffset = 8192;
@@ -400,7 +405,12 @@ describe.skipIf(process.platform === "win32")(
         );
       },
     );
+  },
+);
 
+describe.skipIf(process.platform === "win32")(
+  "PSP explicit loader boundary",
+  () => {
     it("forces the PSP loader/language only for the selected profile", () => {
       const paths = {
         projectRoot: "/project",

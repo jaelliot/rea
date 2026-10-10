@@ -266,14 +266,29 @@ try {
         JSON.parse(await readFile(snapshotPath, "utf8")),
       );
       assert.equal(snapshot.target.architecture, "mips");
+      const abi = independent.mips.abiFlags;
       assert.deepEqual(
-        snapshot.target.mips,
-        independent.mips,
-        "Snapshot did not retain the independently inspected target ABI",
-      );
-      assert.equal(
-        snapshot.binding.analysis_profile.parameters.mips_elf.byte_order,
-        byteOrder,
+        snapshot.binding.analysis_profile.parameters.mips_elf,
+        {
+          elf_class: independent.mips.elfClass,
+          byte_order: independent.mips.byteOrder,
+          type: independent.mips.type,
+          flags: independent.mips.flags,
+          abi_flags: {
+            version: abi.version,
+            isa_level: abi.isaLevel,
+            isa_revision: abi.isaRevision,
+            gpr_size: abi.gprSize,
+            cpr1_size: abi.cpr1Size,
+            cpr2_size: abi.cpr2Size,
+            fp_abi: abi.fpAbi,
+            isa_extension: abi.isaExtension,
+            ases: abi.ases,
+            flags1: abi.flags1,
+            flags2: abi.flags2,
+          },
+        },
+        "Snapshot profile did not retain the independently inspected ELF/ABI declaration",
       );
       assert.ok(snapshot.evidence_bundle.records.length > 0);
       if (psp) {
