@@ -9,13 +9,13 @@ permissions:
   contents: read
 
 concurrency:
-  group: fork-psp-public-verify-c07024d
+  group: fork-psp-public-verify-0662433
   cancel-in-progress: true
 
 env:
   HUSKY: "0"
   TURBO_TELEMETRY_DISABLED: "1"
-  SOURCE_SHA: c07024dec5cc59e23e2645293f8bd54252a6390a
+  SOURCE_SHA: 066243380d2207ac0f9608c1c053d18ba492ba8b
 
 jobs:
   verify:
@@ -25,7 +25,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: c07024dec5cc59e23e2645293f8bd54252a6390a
+          ref: 066243380d2207ac0f9608c1c053d18ba492ba8b
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
