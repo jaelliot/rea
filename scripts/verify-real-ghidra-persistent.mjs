@@ -9,6 +9,7 @@ import {
   readFile,
   readdir,
   rm,
+  writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
@@ -32,8 +33,11 @@ import {
 
 // Builds a saved Ghidra project from the source-owned PE fixture, names its
 // entry in the project, then opens it through REA with REA_GHIDRA_PROJECT.
-if (process.argv.length !== 2)
-  throw new Error("Usage: node scripts/verify-real-ghidra-persistent.mjs");
+const historicalSeeds = process.argv.length === 3 && process.argv[2] === "--historical-seeds";
+if (!historicalSeeds && process.argv.length !== 2)
+  throw new Error(
+    "Usage: node scripts/verify-real-ghidra-persistent.mjs [--historical-seeds]",
+  );
 if (!["linux", "darwin"].includes(process.platform))
   throw new Error(
     "verify:ghidra:persistent supports Linux/macOS hosts; the Windows P0 run is a separate follow-up.",
@@ -105,6 +109,33 @@ try {
     prepared,
   );
   const projectFile = join(projects, "Fixture.gpr");
+  let historicalSeedDigest = null;
+  if (historicalSeeds) {
+    // Apply and save a seed report in the *caller-owned project*, before REA
+    // opens it. The REA session must observe that history, not claim to
+    // have applied these seeds itself.
+    const seedPath = join(workspace, "historical-seeds.tsv");
+    const seedText = `${ENTRY}\tfunction\t${PROJECT_NAME}\n`;
+    historicalSeedDigest = digest(Buffer.from(seedText));
+    await writeFile(seedPath, seedText, { mode: 0o600 });
+    const seedOutput = await runHeadless([
+      projects,
+      "Fixture",
+      "-process",
+      "Fixture.exe",
+      "-noanalysis",
+      "-scriptPath",
+      join(root, "bridge", "ghidra"),
+      "-postScript",
+      "ReaGhidraApplySeeds.java",
+      seedPath,
+    ]);
+    assert.ok(
+      seedOutput.includes("REA seeds applied:") &&
+        seedOutput.includes(historicalSeedDigest),
+      seedOutput,
+    );
+  }
   const before = await projectDigests(projects);
 
   // 2. Open the saved project through REA: no import, no analysis.
@@ -167,12 +198,27 @@ try {
       ),
       JSON.stringify(evidence.limitations),
     );
+    if (historicalSeedDigest !== null)
+      assert.ok(
+        evidence.limitations.some(
+          (limitation) =>
+            limitation.includes("historical seed report") &&
+            limitation.includes(historicalSeedDigest) &&
+            limitation.includes("not applied by REA now"),
+        ),
+        JSON.stringify(evidence.limitations),
+      );
     const annotation = await tool("annotate_native_function", {
       procedure: ENTRY,
       name: "rea_must_not_apply",
     });
     assert.equal(annotation.isError, true, JSON.stringify(annotation));
     const refusedAnnotation = requireMcpToolError(annotation);
+    assert.equal(
+      refusedAnnotation.code,
+      "capability_unavailable",
+      JSON.stringify(refusedAnnotation),
+    );
     await tool("close_binary");
 
     // 3. The same project refuses another artifact and names both digests.
@@ -205,6 +251,9 @@ try {
       annotation_refusal: refusedAnnotation.code,
       mismatch_refusal: mismatchError.code,
       mismatch_message: mismatchError.message,
+      ...(historicalSeedDigest === null
+        ? {}
+        : { historical_seed_digest: historicalSeedDigest }),
     };
   } catch (error) {
     if (stderr.length > 0) console.error(stderr);
