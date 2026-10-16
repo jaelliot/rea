@@ -269,6 +269,16 @@ export const ghidraSeedFailure = (
       });
 };
 
+/** A saved Program's seed report records earlier preparation, not this session's work. */
+export const ghidraHistoricalSeedLimitations = (
+  report: GhidraSeedReport | undefined,
+): readonly string[] =>
+  report === undefined
+    ? []
+    : [
+        `The caller-selected persistent Ghidra project retains a historical seed report (sha256 ${report.sha256}; ${report.entries} entries). Those seeds were applied before this session, not applied by REA now. The saved names and analysis facts are caller/project assertions, not discoveries of this session.`,
+      ];
+
 /** Session limitations that keep seeded facts distinct from Ghidra discoveries. */
 export const ghidraSeedLimitations = (
   commitment: GhidraSeedCommitment | undefined,
