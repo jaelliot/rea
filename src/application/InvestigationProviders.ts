@@ -21,7 +21,9 @@ export const workflowAnalysisProfile = (
     source_limitations: "provider-operation-caveats-v1",
     ...(operation === "binary_overview"
       ? { workflow_revision: 4 }
-      : operation === "batch_decompile" ||
+      : operation === "inspect_native_api"
+        ? { workflow_revision: 2 }
+        : operation === "batch_decompile" ||
           operation === "get_call_graph" ||
           operation === "trace_feature"
         ? { workflow_revision: 3 }
