@@ -13,7 +13,7 @@ import { parseEvidence } from "../dist/domain/evidence.js";
 import { parseAnalysisSnapshot } from "../dist/domain/analysisSnapshot.js";
 import { parseBinaryTarget } from "../dist/application/BinaryTargetResolver.js";
 import { inspectGhidraInstallation } from "../dist/ghidra/GhidraInstallation.js";
-import { parsePspReadelfAbi, assertPspLoadedImage } from "../tests/conformance/ghidra/psp-fixture.mjs";
+import { parsePspReadelfMips, assertPspLoadedImage } from "../tests/conformance/ghidra/psp-fixture.mjs";
 import { requireMcpOperationResult } from "./lib/mcp-verifier-results.mjs";
 import { createVerifierRun, completeVerifierRun, assertVerifierCleanupComplete } from "./lib/verifier-run.mjs";
 
@@ -78,7 +78,7 @@ try {
   assert.match(elf, /Class:\s+ELF32/u);
   assert.match(elf, /Type:\s+EXEC\b/u);
   assert.match(elf, /Flags:\s+0x10a23001\b/u);
-  const abiFlags = parsePspReadelfAbi(elf);
+  const independentMips = parsePspReadelfMips(elf);
   const symbols = {};
   for (const [, name] of names) {
     const rows = elf.split("\n").map((line) => line.trim().split(/\s+/u))
@@ -95,7 +95,7 @@ try {
   if (!parsed.ok) throw parsed.error;
   assert.equal(parsed.value.sha256, targetSha);
   assert.equal(parsed.value.mips.flags, 0x10a23001);
-  assert.deepEqual(parsed.value.mips.abiFlags, abiFlags);
+  assert.deepEqual(parsed.value.mips, independentMips);
 
   const env = {
     PATH: process.env.PATH ?? "/usr/bin:/bin",
@@ -211,7 +211,7 @@ try {
     feature_pr: 2977,
     provider_uncertainty_coverage_established: false,
     ghidra_version: ghidra.providerVersion,
-    abi_flags: abiFlags,
+    mips_elf: independentMips,
     original_sha256: targetSha,
     source_sha256: sourceDigests,
     symbol_entries: symbols,
