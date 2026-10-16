@@ -2235,65 +2235,6 @@ describe("Ghidra analysis seeds and configured language", () => {
     unmapped: 0,
   });
 
-  it("retains an existing project's historical seed report without claiming new application", async () => {
-    const root = await mkdtemp(join(tmpdir(), "rea-persistent-seed-report-"));
-    const projectFile = join(root, "Fixture.gpr");
-    await writeFile(projectFile, "");
-    await mkdir(join(root, "Fixture.rep"));
-    try {
-      const config = parseConfig({
-        GHIDRA_INSTALL_DIR: INSTALL,
-        REA_GHIDRA_PROJECT: projectFile,
-        REA_GHIDRA_PROGRAM: "/Fixture.exe",
-      });
-      if (!config.ok) throw config.error;
-      const target = executableTarget("pe", "x86_64");
-      const savedReport = applied("b".repeat(64));
-      const ghidra = new GhidraProvider(
-        config.value,
-        silentLogger,
-        {},
-        installationHost(),
-        () => ({
-          start: () =>
-            Promise.resolve(
-              ok({
-                ...sessionInfo(),
-                project: {
-                  mode: "persistent-project-read-only",
-                  program: "/Fixture.exe",
-                  executable_sha256: target.sha256,
-                },
-                analysis_seeds: savedReport,
-              }),
-            ),
-          callTool: () => Promise.resolve(ok(null)),
-          close: () => Promise.resolve(ok(null)),
-        }),
-      );
-      const resolved = await ghidra.resolveAnalysisProfile(target);
-      if (!resolved.ok || resolved.value.profile === null)
-        throw new Error("expected persistent project profile");
-      const client = ghidra.createClient(target, resolved.value.profile);
-      try {
-        const health = await client.execute("health", {});
-        expect(health.ok).toBe(true);
-        if (health.ok)
-          expect(health.value.limitations).toEqual(
-            expect.arrayContaining([
-              expect.stringContaining("historical"),
-              expect.stringContaining(savedReport.sha256),
-              expect.stringContaining("not applied"),
-            ]),
-          );
-      } finally {
-        await client.close();
-      }
-    } finally {
-      await rm(root, { recursive: true, force: true });
-    }
-  });
-
   it("reports the verified seed outcome as a session limitation", async () => {
     const { directory, client } = await seedSession(applied);
     try {
@@ -2374,6 +2315,80 @@ describe("Ghidra analysis seeds and configured language", () => {
       expect(starts).toBe(0);
     }
   });
+});
+
+describe("Ghidra persistent historical seed report", () => {
+  it("retains an existing project's historical seed report without claiming new application", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rea-persistent-seed-report-"));
+    const projectFile = join(root, "Fixture.gpr");
+    await writeFile(projectFile, "");
+    await mkdir(join(root, "Fixture.rep"));
+    try {
+      const config = parseConfig({
+        GHIDRA_INSTALL_DIR: INSTALL,
+        REA_GHIDRA_PROJECT: projectFile,
+        REA_GHIDRA_PROGRAM: "/Fixture.exe",
+      });
+      if (!config.ok) throw config.error;
+      const target = executableTarget("pe", "x86_64");
+      const savedReport: GhidraSeedReport = {
+        format: "rea-ghidra-seeds-v1",
+        sha256: "b".repeat(64),
+        entries: 2,
+        function_created: 1,
+        function_existing: 0,
+        function_failed: 0,
+        code_decoded: 0,
+        code_failed: 1,
+        label_applied: 0,
+        label_failed: 0,
+        unmapped: 0,
+      };
+      const ghidra = new GhidraProvider(
+        config.value,
+        silentLogger,
+        {},
+        installationHost(),
+        () => ({
+          start: () =>
+            Promise.resolve(
+              ok({
+                ...sessionInfo(),
+                project: {
+                  mode: "persistent-project-read-only",
+                  program: "/Fixture.exe",
+                  executable_sha256: target.sha256,
+                },
+                analysis_seeds: savedReport,
+              }),
+            ),
+          callTool: () => Promise.resolve(ok(null)),
+          close: () => Promise.resolve(ok(null)),
+        }),
+      );
+      const resolved = await ghidra.resolveAnalysisProfile(target);
+      if (!resolved.ok || resolved.value.profile === null)
+        throw new Error("expected persistent project profile");
+      const client = ghidra.createClient(target, resolved.value.profile);
+      try {
+        const health = await client.execute("health", {});
+        expect(health.ok).toBe(true);
+        if (health.ok)
+          expect(health.value.limitations).toEqual(
+            expect.arrayContaining([
+              expect.stringContaining("historical"),
+              expect.stringContaining(savedReport.sha256),
+              expect.stringContaining("not applied"),
+            ]),
+          );
+      } finally {
+        await client.close();
+      }
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
 });
 
 describe("Ghidra disabled analyzer options", () => {
