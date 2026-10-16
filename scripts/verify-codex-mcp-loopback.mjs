@@ -142,6 +142,8 @@ try {
     'command = ' + JSON.stringify(process.execPath),
     'args = ' + JSON.stringify([serverScript, "mcp"]),
     'enabled_tools = ["binary_session"]',
+    'required = true',
+    'startup_readiness = "connection"',
     'startup_timeout_sec = 30',
     'tool_timeout_sec = 120',
     '[mcp_servers.rea.env]',
