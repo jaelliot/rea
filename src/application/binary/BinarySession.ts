@@ -290,8 +290,9 @@ export class BinarySession
       return err(new AnalysisCancelledError("open_binary"));
     const resolved = await resolve();
     if (!resolved.ok) return resolved;
-    const { target, route, sameTarget } = resolved.value;
-    const { profile } = route;
+    const { target, sameTarget } = resolved.value;
+    let { route } = resolved.value;
+    let { profile } = route;
     if (isAborted(options.signal))
       return err(new AnalysisCancelledError("open_binary"));
     const activeProfile = this.#active?.profile;
@@ -314,6 +315,27 @@ export class BinarySession
         options,
       );
       if (fastPath !== undefined) return fastPath;
+      // A dead client may be replaced by a new copy of an externally
+      // maintained analysis project. Keep the selected provider, but let its
+      // owner recommit the replacement client's analysis state before using
+      // any previously cached results or importing an explicit snapshot.
+      const refreshed = await this.#providerRouter.refreshBoundProfile(
+        target,
+        route,
+        options.signal,
+      );
+      if (!refreshed.ok) return refreshed;
+      route = refreshed.value;
+      profile = route.profile;
+      const checked = validateResolvedSessionTarget({
+        current: this.#active,
+        target,
+        route,
+        options,
+        stagedSnapshotMatches: (target, profile) =>
+          this.matchesSnapshot(target, profile),
+      });
+      if (!checked.ok) return checked;
     }
     const previous = this.#active;
     this.#active = undefined;
