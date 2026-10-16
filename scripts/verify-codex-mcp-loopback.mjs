@@ -63,6 +63,11 @@ const fixture = createServer(async (req, res) => {
       requested_model: body.model,
       advertised_tools: names,
       request_sha256: sha(JSON.stringify(body)),
+      body_keys: Object.keys(body).sort(),
+      tool_choice: body.tool_choice ?? null,
+      direct_tool_definitions: Array.isArray(body.tools) ? body.tools.length : null,
+      tool_namespaces: Object.keys(body.namespaces ?? {}).slice(0, 25),
+      includes_function_call: JSON.stringify(body).includes("mcp__rea__binary_session"),
     });
     const responseId = "resp-rea-loopback-" + index;
     const outputs = [];
@@ -261,8 +266,13 @@ try {
   console.error(JSON.stringify({
     error: String(error),
     mock_error: serverFailure ?? null,
-    requests: modelRequests.map(({ turn, advertised_tools }) => ({
-      turn, advertised_tools: advertised_tools.slice(0, 25),
+    requests: modelRequests.map(({ turn, advertised_tools, body_keys,
+      tool_choice, direct_tool_definitions, tool_namespaces,
+      includes_function_call }) => ({
+      turn,
+      advertised_tools: advertised_tools.slice(0, 25),
+      body_keys, tool_choice, direct_tool_definitions, tool_namespaces,
+      includes_function_call,
     })),
     codex_stderr_tail: cliStderr.slice(-1500),
     codex_stdout_tail: transcript.slice(-2200),
