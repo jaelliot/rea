@@ -38,8 +38,13 @@ jobs:
           npm ci
           npm run build:cached
           npm run test:prepare
-      - name: Focused persistent project path regressions
-        run: npx vitest run tests/boundary/providers/ghidra/ghidraPersistentProjectPath.test.ts
+      - name: Persistent project paths and existing provider boundary regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx vitest run tests/boundary/providers/ghidra/ghidraPersistentProjectPath.test.ts src/ghidra/GhidraPersistentProject.test.ts tests/boundary/providers/ghidra/ghidraLauncher.test.ts
+          npm run verify:test-discovery
+          npm run docs:check
       - name: Fresh typecheck and lint
         run: npm run check:fast -- --force
       - name: Source cleanliness
