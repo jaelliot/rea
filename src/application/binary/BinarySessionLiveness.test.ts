@@ -74,6 +74,33 @@ describe("BinarySession open liveness", () => {
     expect(deep.created).toHaveLength(2);
   });
 
+  it("does not replay a previous owned-project copy after restarting a dead provider", async () => {
+    // One caller-owned project changes between two provider-owned copies.
+    const projectSource = { functionName: "old_saved_project_name" };
+    const { session, deep } = openSession({ projectSource });
+    expect((await session.open(process.execPath)).ok).toBe(true);
+    const input = { address: "0x401000", document: "Fixture.exe" };
+    const original = await session.execute("address_name", input);
+    expect(original).toMatchObject({
+      ok: true,
+      value: { result: "old_saved_project_name" },
+    });
+    expect(deep.created).toHaveLength(1);
+
+    projectSource.functionName = "new_saved_project_name";
+    deep.created[0]?.kill();
+    expect((await session.open(process.execPath)).ok).toBe(true);
+
+    // A replacement copy must not inherit results from the dead copy.
+    const reopened = await session.execute("address_name", input);
+    expect(reopened).toMatchObject({
+      ok: true,
+      value: { result: "new_saved_project_name" },
+    });
+    expect(deep.created).toHaveLength(2);
+    await session.close();
+  });
+
   it("treats an uncharacterized operation failure as dead", async () => {
     // A recorded failure the provider could not characterize ("unknown",
     // e.g. a Hopper spawn failure with no observed exit code) is never
@@ -321,6 +348,7 @@ const openSession = (
     operationHealth?: boolean;
     failOperationInitially?: boolean;
     beforeFirstClose?: () => Promise<void>;
+    projectSource?: { functionName: string };
   } = {},
 ): {
   session: BinarySession;
@@ -355,12 +383,14 @@ const killableDeepProvider = (options: {
   operationHealth?: boolean;
   failOperationInitially?: boolean;
   beforeFirstClose?: () => Promise<void>;
+  projectSource?: { functionName: string };
 }): {
   provider: AnalysisProviderCandidate;
   created: KillableChild[];
   onProbe: (hook: () => void) => void;
 } => {
   const created: KillableChild[] = [];
+  let profileGeneration = 0;
   let probeHook: (() => void) | undefined;
   const withOperationHealth = options.operationHealth !== false;
   const provider: AnalysisProviderCandidate = {
@@ -383,12 +413,21 @@ const killableDeepProvider = (options: {
         ok({
           profile: createAnalysisProfile(
             { id: deepIdentity.id, name: deepIdentity.name, version: "1" },
-            { fixture: "liveness" },
+            options.projectSource === undefined
+              ? { fixture: "liveness" }
+              : {
+                  fixture: "liveness",
+                  existing_project: {
+                    program_name: "Fixture.exe",
+                    session_id: `owned-copy-${String(++profileGeneration)}`,
+                  },
+                },
           ),
         }),
       ),
     createClient: (): KillableChild => {
       const firstClient = created.length === 0;
+      const copiedProjectName = options.projectSource?.functionName;
       let alive = true;
       let failOperation =
         firstClient && options.failOperationInitially === true;
@@ -403,7 +442,9 @@ const killableDeepProvider = (options: {
             ? Promise.resolve(
                 ok(
                   createAnalysisExecution(
-                    operation === "health" ? null : `liveness:${operation}`,
+                    operation === "health"
+                      ? null
+                      : (copiedProjectName ?? `liveness:${operation}`),
                     deepIdentity,
                   ),
                 ),
