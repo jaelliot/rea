@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 import {
   ghidraPersistentProjectLocation,
   ghidraProjectFileSchema,
-} from "../../../src/config/ghidraPersistentProject.js";
+} from "../../../../src/config/ghidraPersistentProject.js";
 
 describe("persistent Ghidra project marker identity", () => {
   it.skipIf(process.platform === "win32")(
