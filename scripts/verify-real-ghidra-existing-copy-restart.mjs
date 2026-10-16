@@ -10,6 +10,7 @@ import { promisify } from "node:util";
 import { Client } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 import { parseEvidence } from "../dist/domain/evidence.js";
+import { toolContract } from "../dist/contracts/toolContracts.js";
 import { cleanupOwnedProcessGroup } from "../dist/process/ProcessOwnership.js";
 import {
   ProviderProcessSupervisor,
@@ -107,7 +108,7 @@ try {
   assert.equal(first.analysis_profile.parameters.import_mode, "existing-project-copy");
   assert.match(first.normalized_result, /saved_first_version/u);
 
-  const status = await call("binary_session");
+  const status = await readSessionStatus();
   const beforeRunId = status.analysis_run?.run_id;
   const lineage = status.analysis_run?.process_lineage;
   const ghidra = lineage?.snapshots?.find(
@@ -144,7 +145,7 @@ try {
   assert.doesNotMatch(second.normalized_result, /saved_first_version/u);
   assert.notEqual(second.analysis_profile.digest, first.analysis_profile.digest);
   assert.equal(second.analysis_profile.provider.id, first.analysis_profile.provider.id);
-  const freshStatus = await call("binary_session");
+  const freshStatus = await readSessionStatus();
   assert.notEqual(freshStatus.analysis_run?.run_id, beforeRunId);
   assert.equal(sha256(await readFile(targetPath)), originalDigest);
   await call("close_binary");
@@ -172,6 +173,14 @@ const verifierRun = await completeVerifierRun(run);
 assertVerifierCleanupComplete(verifierRun.process_lineage);
 assert.ok(report, "No real Ghidra restart report produced");
 process.stdout.write(JSON.stringify({ verifier_run: verifierRun, ...report }, null, 2) + "\n");
+
+async function readSessionStatus() {
+  // Lifecycle tools project { result, ... } rather than a flat status.
+  // Parse through the production contract so an absent or changed status
+  // shape cannot authorize termination of an unverified host process.
+  const response = await call("binary_session");
+  return toolContract("binary_session").outputSchema.parse(response).result;
+}
 
 function sha256(bytes) {
   return createHash("sha256").update(bytes).digest("hex");
