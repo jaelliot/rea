@@ -38,8 +38,13 @@ jobs:
           npm ci
           npm run build:cached
           npm run test:prepare
-      - name: Actual BinarySession liveness and cache regression
-        run: npx vitest run src/application/binary/BinarySessionLiveness.test.ts
+      - name: Session lifecycle, snapshot and MCP replay regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx vitest run src/application/binary/BinarySessionLiveness.test.ts src/application/binary/AnalysisSnapshotCache.test.ts tests/boundary/mcp/workflowSnapshotReplayMcp.test.ts tests/boundary/filesystem/directAnalysisSnapshotReplay.test.ts
+          npm run verify:test-discovery
+          npm run docs:check
       - name: Fresh typecheck and lint
         if: always()
         run: npm run check:fast -- --force
