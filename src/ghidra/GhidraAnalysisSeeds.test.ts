@@ -15,6 +15,7 @@ import type { BinaryTarget } from "../domain/binaryTargetTypes.js";
 import { projectAnalysisError } from "../domain/analysisErrorProjection.js";
 import { silentLogger } from "../logger.js";
 import {
+  ghidraHistoricalSeedLimitations,
   ghidraSeedFailure,
   ghidraSeedLimitations,
   parseGhidraSeeds,
@@ -180,6 +181,18 @@ describe("Ghidra seed session verification", () => {
       ),
     ]);
     expect(ghidraSeedLimitations(undefined)).toEqual([]);
+  });
+
+  it("retains saved-project seed provenance without claiming current application", () => {
+    expect(ghidraHistoricalSeedLimitations(undefined)).toEqual([]);
+    const limitations = ghidraHistoricalSeedLimitations(report);
+    expect(limitations).toEqual([
+      expect.stringContaining("historical seed report"),
+    ]);
+    expect(limitations[0]).toContain(report.sha256);
+    expect(limitations[0]).toContain("not applied by REA now");
+    expect(limitations[0]).toContain("caller/project assertions");
+    expect(ghidraSeedFailure(undefined, report, "xrefs")).toBeDefined();
   });
 
   it.each([
