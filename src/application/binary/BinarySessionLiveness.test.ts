@@ -74,58 +74,6 @@ describe("BinarySession open liveness", () => {
     expect(deep.created).toHaveLength(2);
   });
 
-  it("does not replay a previous owned-project copy after restarting a dead provider", async () => {
-    // One caller-owned project changes between two provider-owned copies.
-    const projectSource = { functionName: "old_saved_project_name" };
-    const { session, deep } = openSession({ projectSource });
-    expect((await session.open(process.execPath)).ok).toBe(true);
-    const input = { address: "0x401000", document: "Fixture.exe" };
-    const original = await session.execute("address_name", input);
-    expect(original).toMatchObject({
-      ok: true,
-      value: { result: "old_saved_project_name" },
-    });
-    expect(deep.created).toHaveLength(1);
-    const firstProfile = session.analysisProfile();
-    if (firstProfile === undefined) throw new Error("Missing first analysis profile");
-    const firstSnapshot = session.exportAnalysisSnapshot();
-    if (!firstSnapshot.ok) throw firstSnapshot.error;
-    // Within one living copy, repeated immutable queries remain cached.
-    expect((await session.execute("address_name", input)).ok).toBe(true);
-    expect(deep.created[0]?.queryCalls).toBe(1);
-
-    projectSource.functionName = "new_saved_project_name";
-    deep.created[0]?.kill();
-    expect((await session.open(process.execPath)).ok).toBe(true);
-
-    // A replacement copy must not inherit results from the dead copy.
-    const reopened = await session.execute("address_name", input);
-    expect(reopened).toMatchObject({
-      ok: true,
-      value: { result: "new_saved_project_name" },
-    });
-    expect(deep.created).toHaveLength(2);
-    const replacementProfile = session.analysisProfile();
-    expect(replacementProfile?.digest).not.toBe(firstProfile.digest);
-    expect(replacementProfile?.provider).toEqual(firstProfile.provider);
-    // Restart invalidates the prior copy's snapshot profile, not every
-    // immutable answer in the newly established copy.
-    expect((await session.execute("address_name", input)).ok).toBe(true);
-    expect(deep.created[1]?.queryCalls).toBe(1);
-    const rejected = await session.open(process.execPath, {
-      snapshot: firstSnapshot.value,
-    });
-    expect(rejected).toMatchObject({
-      ok: false,
-      error: {
-        _tag: "EvidenceIntegrityError",
-        message: expect.stringContaining("profile_mismatch"),
-      },
-    });
-    expect(session.analysisProfile()?.digest).toBe(replacementProfile?.digest);
-    await session.close();
-  });
-
   it("treats an uncharacterized operation failure as dead", async () => {
     // A recorded failure the provider could not characterize ("unknown",
     // e.g. a Hopper spawn failure with no observed exit code) is never
@@ -237,6 +185,61 @@ describe("BinarySession open liveness", () => {
     expect(reopened.ok).toBe(true);
     expect(deep.created).toHaveLength(1);
   });
+});
+
+describe("Saved Ghidra copy refresh", () => {
+  it("does not replay a previous owned-project copy after restarting a dead provider", async () => {
+    // One caller-owned project changes between two provider-owned copies.
+    const projectSource = { functionName: "old_saved_project_name" };
+    const { session, deep } = openSession({ projectSource });
+    expect((await session.open(process.execPath)).ok).toBe(true);
+    const input = { address: "0x401000", document: "Fixture.exe" };
+    const original = await session.execute("address_name", input);
+    expect(original).toMatchObject({
+      ok: true,
+      value: { result: "old_saved_project_name" },
+    });
+    expect(deep.created).toHaveLength(1);
+    const firstProfile = session.analysisProfile();
+    if (firstProfile === undefined) throw new Error("Missing first analysis profile");
+    const firstSnapshot = session.exportAnalysisSnapshot();
+    if (!firstSnapshot.ok) throw firstSnapshot.error;
+    // Within one living copy, repeated immutable queries remain cached.
+    expect((await session.execute("address_name", input)).ok).toBe(true);
+    expect(deep.created[0]?.queryCalls).toBe(1);
+
+    projectSource.functionName = "new_saved_project_name";
+    deep.created[0]?.kill();
+    expect((await session.open(process.execPath)).ok).toBe(true);
+
+    // A replacement copy must not inherit results from the dead copy.
+    const reopened = await session.execute("address_name", input);
+    expect(reopened).toMatchObject({
+      ok: true,
+      value: { result: "new_saved_project_name" },
+    });
+    expect(deep.created).toHaveLength(2);
+    const replacementProfile = session.analysisProfile();
+    expect(replacementProfile?.digest).not.toBe(firstProfile.digest);
+    expect(replacementProfile?.provider).toEqual(firstProfile.provider);
+    // Restart invalidates the prior copy's snapshot profile, not every
+    // immutable answer in the newly established copy.
+    expect((await session.execute("address_name", input)).ok).toBe(true);
+    expect(deep.created[1]?.queryCalls).toBe(1);
+    const rejected = await session.open(process.execPath, {
+      snapshot: firstSnapshot.value,
+    });
+    expect(rejected).toMatchObject({
+      ok: false,
+      error: {
+        _tag: "EvidenceIntegrityError",
+        message: expect.stringContaining("profile_mismatch"),
+      },
+    });
+    expect(session.analysisProfile()?.digest).toBe(replacementProfile?.digest);
+    await session.close();
+  });
+
 });
 
 it("clears retired runtime availability after cancelled-switch restoration", async () => {
