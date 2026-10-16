@@ -28,6 +28,8 @@ let fixtureError;
 let modelLoop;
 let done = false;
 let status = null;
+let codexEvents = [];
+let observedModelTools = [];
 const usage = {
   input_tokens: 18,
   input_tokens_details: { cached_tokens: 0 },
@@ -59,6 +61,7 @@ const modelServer = createServer(async (req, res) => {
     assert.ok(Array.isArray(body.tools), "Codex omitted tool schemas");
     const names = body.tools.flatMap((tool) =>
       typeof tool?.name === "string" ? [tool.name] : []);
+    observedModelTools = names;
     const targetName = names.find((name) => name.endsWith("__binary_session"));
     assert.ok(targetName, "Codex did not advertise REA binary_session: " + JSON.stringify(names));
     const inputOutputs = body.input.filter((item) =>
@@ -202,10 +205,10 @@ try {
       }, 65000).unref();
     }),
   ]);
-  const events = stdout.split("\n").filter(Boolean).flatMap((line) => {
+  codexEvents = stdout.split("\n").filter(Boolean).flatMap((line) => {
     try { return [JSON.parse(line)]; } catch { return []; }
   });
-  const completed = events.filter((evt) =>
+  const completed = codexEvents.filter((evt) =>
     evt.type === "item.completed" &&
     evt.item?.type === "mcp_tool_call" &&
     evt.item?.server === "rea" &&
@@ -241,6 +244,15 @@ try {
     error: String(error),
     fixture_error: fixtureError ?? null,
     rounds_completed: requests.length,
+    initial_model_tools: observedModelTools,
+    codex_event_summary: codexEvents.slice(-30).map((event) => ({
+      type: event.type ?? null,
+      item_type: event.item?.type ?? null,
+      item_server: event.item?.server ?? null,
+      item_tool: event.item?.tool ?? null,
+      item_status: event.item?.status ?? null,
+      error_code: event.error?.code ?? null,
+    })),
     first_request_tool_names: [],
     user_settings_changed: false,
   };
