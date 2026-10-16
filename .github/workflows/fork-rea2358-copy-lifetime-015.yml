@@ -1,0 +1,46 @@
+name: Fork REA copy-first Ghidra restart regression
+
+on:
+  push:
+    branches:
+      - codex/rea2358-copy-lifetime-015
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fork-rea2358-copy-lifetime-015
+  cancel-in-progress: true
+
+jobs:
+  restart-regression:
+    if: github.repository == 'jaelliot/rea'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      HUSKY: "0"
+      TURBO_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Reproducible source and toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rev-parse HEAD
+          node --version
+          npm --version
+          npm ci
+          npm run build:cached
+          npm run test:prepare
+      - name: Actual BinarySession liveness and cache regression
+        run: npx vitest run src/application/binary/BinarySessionLiveness.test.ts
+      - name: Fresh typecheck and lint
+        run: npm run check:fast -- --force
+      - name: Source cleanliness
+        run: git diff --exit-code && git diff --check
