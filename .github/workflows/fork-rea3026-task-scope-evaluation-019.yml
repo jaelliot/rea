@@ -1,0 +1,80 @@
+name: Fork REA scoped MCP task preflight
+
+on:
+  push:
+    branches:
+      - codex/rea3026-task-scope-evaluation-019
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fork-rea3026-task-scope-evaluation-019
+  cancel-in-progress: true
+
+jobs:
+  real-task-preflight:
+    if: github.repository == 'jaelliot/rea'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      HUSKY: "0"
+      TURBO_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Build pinned PR code and run source contract checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rev-parse HEAD
+          node --version
+          npm --version
+          npm ci
+          npm run build:cached
+          npm run test:prepare
+          node --check scripts/verify-mcp-family-task-economy.mjs
+          npx vitest run src/contracts/toolFamilies.test.ts tests/conformance/contracts/mcpToolFamilies.test.ts tests/boundary/mcp/toolFamiliesMcp.test.ts
+          npm run check:fast -- --force
+      - name: Provision official checksum-pinned Ghidra 12.1.4
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${JAVA_HOME_21_X64:-}"
+          echo "JAVA_HOME=$JAVA_HOME_21_X64" >> "$GITHUB_ENV"
+          "$JAVA_HOME_21_X64/bin/java" -version
+          curl --fail --location --retry 2 --max-time 420 'https://github.com/NationalSecurityAgency/ghidra/releases/download/Ghidra_12.1.4_build/ghidra_12.1.4_PUBLIC_20260921.zip' -o "$RUNNER_TEMP/ghidra-12.1.4.zip"
+          echo "ddac49f903da9d5bac833e5cc79395098b9c33cfd3279be5f31bd00387d2d4db  $RUNNER_TEMP/ghidra-12.1.4.zip" | sha256sum --check
+          mkdir -p "$RUNNER_TEMP/rea3026-ghidra" "$RUNNER_TEMP/rea3026-results"
+          unzip -q "$RUNNER_TEMP/ghidra-12.1.4.zip" -d "$RUNNER_TEMP/rea3026-ghidra"
+          GHIDRA_DIR="$RUNNER_TEMP/rea3026-ghidra/ghidra_12.1.4_PUBLIC"
+          test -x "$GHIDRA_DIR/support/analyzeHeadless"
+          echo "GHIDRA_INSTALL_DIR=$GHIDRA_DIR" >> "$GITHUB_ENV"
+          sha256sum "$RUNNER_TEMP/ghidra-12.1.4.zip" > "$RUNNER_TEMP/rea3026-results/ghidra-archive.sha256"
+      - name: Six real MCP tasks across three discovery configurations
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/verify-mcp-family-task-economy.mjs "$RUNNER_TEMP/rea3026-results/report.json"
+      - name: Validate receipt and original code cleanliness
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/rea3026-results"
+          git rev-parse HEAD > "$RUNNER_TEMP/rea3026-results/commit.txt"
+          git status --short > "$RUNNER_TEMP/rea3026-results/git-status.txt"
+          git diff --check
+          git diff --exit-code
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: rea3026-real-task-preflight-019
+          path: ${{ runner.temp }}/rea3026-results/
+          if-no-files-found: warn
+          retention-days: 5
