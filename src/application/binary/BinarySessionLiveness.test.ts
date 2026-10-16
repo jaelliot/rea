@@ -117,7 +117,10 @@ describe("BinarySession open liveness", () => {
     });
     expect(rejected).toMatchObject({
       ok: false,
-      error: { _tag: "AnalysisSnapshotMismatchError" },
+      error: {
+        _tag: "EvidenceIntegrityError",
+        message: expect.stringContaining("profile_mismatch"),
+      },
     });
     expect(session.analysisProfile()?.digest).toBe(replacementProfile?.digest);
     await session.close();
