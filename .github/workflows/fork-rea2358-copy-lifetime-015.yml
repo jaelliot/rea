@@ -41,6 +41,8 @@ jobs:
       - name: Actual BinarySession liveness and cache regression
         run: npx vitest run src/application/binary/BinarySessionLiveness.test.ts
       - name: Fresh typecheck and lint
+        if: always()
         run: npm run check:fast -- --force
       - name: Source cleanliness
+        if: always()
         run: git diff --exit-code && git diff --check
