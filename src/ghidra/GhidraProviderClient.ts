@@ -11,6 +11,7 @@ import type { AppConfig } from "../config/types.js";
 import {
   ghidraSeedCommitmentSchema,
   ghidraSeedFailure,
+  ghidraHistoricalSeedLimitations,
   ghidraSeedLimitations,
 } from "./GhidraAnalysisSeeds.js";
 import {
@@ -718,7 +719,9 @@ export const createGhidraProviderClient = (input: {
         info.analysis_extensions ?? [],
         operation,
       ) ??
-      ghidraSeedFailure(seeds, info.analysis_seeds, operation) ??
+      (persistent
+        ? undefined
+        : ghidraSeedFailure(seeds, info.analysis_seeds, operation)) ??
       (softFloatReason === undefined
         ? undefined
         : new ProviderAdapterError("ghidra", operation, {
@@ -728,7 +731,9 @@ export const createGhidraProviderClient = (input: {
       seedLimitations.splice(
         0,
         seedLimitations.length,
-        ...ghidraSeedLimitations(seeds, info.analysis_seeds),
+        ...(persistent
+          ? ghidraHistoricalSeedLimitations(info.analysis_seeds)
+          : ghidraSeedLimitations(seeds, info.analysis_seeds)),
       );
     if (extensionFailure === undefined)
       softFloatLimitations.splice(
