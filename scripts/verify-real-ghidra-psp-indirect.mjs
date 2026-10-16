@@ -133,6 +133,7 @@ try {
   const observed = [];
   let computedListingBranches = 0;
   let preservedComputedBranches = 0;
+  let originalDispatchInspection;
   for (const [label, symbol, offset, expectedMnemonic] of names) {
     const entry = symbols[symbol];
     assert.ok(procedures.some((p) =>
@@ -149,6 +150,7 @@ try {
     const inspection = await call("inspect_native_api", { procedure: entry });
     assert.ok(inspection.evidence?.evidence_id);
     const nativeApi = inspection.value;
+    if (label === "computed_dispatch") originalDispatchInspection = nativeApi;
     const boundary = nativeApi.boundary;
     const branches = boundary.available ? (boundary.unresolved_indirect_branches ?? []) : [];
     const unresolved = branches.find((b) => BigInt(b.branch_address) === BigInt(address));
@@ -215,15 +217,8 @@ try {
   });
   const replayed = (await call("inspect_native_api",
     { procedure: symbols.rea_psp_computed_dispatch })).value;
-  assert.deepEqual(replayed, observed[0].boundary_available
-    ? {
-      procedure: replayed.procedure,
-      boundary: replayed.boundary,
-      substeps: replayed.substeps,
-      unsupported_branches: replayed.unsupported_branches,
-      residual_unknowns: replayed.residual_unknowns,
-    }
-    : replayed);
+  assert.ok(originalDispatchInspection, "Original API result missing");
+  assert.deepEqual(replayed, originalDispatchInspection);
   assert.ok(Array.isArray(replayed.residual_unknowns));
   await call("close_binary");
   assert.equal(digest(await readFile(targetPath)), targetSha);
