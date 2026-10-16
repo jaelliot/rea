@@ -23,9 +23,11 @@ export interface GhidraPersistentProjectLocation {
   readonly programName: string;
 }
 
-/** Final path component under either separator, as analyzeHeadless reads it. */
-const finalComponent = (path: string): string =>
-  path.slice(Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\")) + 1);
+/** Keep POSIX backslashes as filename bytes; Windows uses them as separators. */
+const finalComponent = (
+  path: string,
+  platform: NodeJS.Platform = process.platform,
+): string => (platform === "win32" ? win32 : posix).basename(path);
 
 /**
  * Parse `REA_GHIDRA_PROJECT`: the absolute path of an existing project's
@@ -40,6 +42,7 @@ export const ghidraProjectFileSchema = z
     const file = finalComponent(value);
     const name = file.slice(0, -GHIDRA_PROJECT_FILE_SUFFIX.length);
     return (
+      (process.platform === "win32" || !value.includes("\\")) &&
       file.endsWith(GHIDRA_PROJECT_FILE_SUFFIX) &&
       name.length > 0 &&
       !/[*?\0]/u.test(name)
@@ -84,7 +87,7 @@ export const ghidraPersistentProjectLocation = (
     throw new TypeError("Ghidra program path is invalid");
   return {
     projectLocation: path.dirname(project.projectFile),
-    projectName: finalComponent(project.projectFile).slice(
+    projectName: finalComponent(project.projectFile, platform).slice(
       0,
       -GHIDRA_PROJECT_FILE_SUFFIX.length,
     ),
