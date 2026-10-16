@@ -62,8 +62,20 @@ const modelServer = createServer(async (req, res) => {
     const names = body.tools.flatMap((tool) =>
       typeof tool?.name === "string" ? [tool.name] : []);
     observedModelTools = names;
-    const targetName = names.find((name) => name.endsWith("__binary_session"));
-    assert.ok(targetName, "Codex did not advertise REA binary_session: " + JSON.stringify(names));
+    const namespace = body.tools.find(
+      (tool) => tool.type === "namespace" && tool.name === "mcp__rea",
+    );
+    const nested = Array.isArray(namespace?.tools)
+      ? namespace.tools.map((tool) => tool.name)
+      : [];
+    const namespaced = nested.includes("binary_session");
+    const flatName = names.find((name) => name.endsWith("__binary_session"));
+    const targetName = namespaced ? "binary_session" : flatName;
+    assert.ok(
+      targetName,
+      "Codex did not advertise the REA binary_session tool: " +
+        JSON.stringify({ top_level: names, namespace_tools: nested }),
+    );
     const inputOutputs = body.input.filter((item) =>
       item?.type === "function_call_output" && item.call_id === callId);
     const round = requests.length + 1;
@@ -75,6 +87,7 @@ const modelServer = createServer(async (req, res) => {
       item = {
         type: "function_call",
         call_id: callId,
+        ...(namespaced ? { namespace: "mcp__rea" } : {}),
         name: targetName,
         arguments: "{}",
       };
