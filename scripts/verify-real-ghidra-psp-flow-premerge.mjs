@@ -74,7 +74,7 @@ try {
   assert.equal(original.readUInt16LE(18), 8);
   assert.equal(original.readUInt32LE(36), 0x10a23001);
 
-  const elf = (await subprocess("psp-readelf", ["-h", "-A", "-sW", targetPath])).stdout;
+  const elf = (await subprocess("psp-readelf", ["-h", "-SW", "-A", "-sW", targetPath])).stdout;
   assert.match(elf, /Class:\s+ELF32/u);
   assert.match(elf, /Type:\s+EXEC\b/u);
   assert.match(elf, /Flags:\s+0x10a23001\b/u);
