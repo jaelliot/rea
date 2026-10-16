@@ -96,14 +96,14 @@ try {
     stderr = (stderr + chunk.toString()).slice(-65536);
   });
 
-  const open = await call("open_binary", {
+  await call("open_binary", {
     path: targetPath,
     provider_id: "ghidra",
   });
-  assert.equal(open.sha256, originalDigest);
   const first = parseEvidence(await call("procedure_pseudo_code", {
     procedure: entry,
   }));
+  assert.equal(first.subject.digest.sha256, originalDigest);
   assert.equal(first.analysis_profile.parameters.import_mode, "existing-project-copy");
   assert.match(first.normalized_result, /saved_first_version/u);
 
@@ -135,11 +135,11 @@ try {
 
   process.kill(pid, "SIGKILL");
   await new Promise((resolve) => setTimeout(resolve, 400));
-  const reopened = await call("open_binary", { path: targetPath });
-  assert.equal(reopened.sha256, originalDigest);
+  await call("open_binary", { path: targetPath });
   const second = parseEvidence(await call("procedure_pseudo_code", {
     procedure: entry,
   }));
+  assert.equal(second.subject.digest.sha256, originalDigest);
   assert.match(second.normalized_result, /saved_second_version/u);
   assert.doesNotMatch(second.normalized_result, /saved_first_version/u);
   assert.notEqual(second.analysis_profile.digest, first.analysis_profile.digest);
