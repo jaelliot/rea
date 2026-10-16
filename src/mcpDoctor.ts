@@ -6,6 +6,8 @@ import { resolve } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 
 import { createCatalogIdentity } from "./catalogIdentity.js";
+import { parseMcpToolFamilies } from "./config/mcpToolFamilies.js";
+import { toolFamilyId } from "./contracts/toolFamilies.js";
 import {
   compactPresentationForMcpInputSchemaProfile,
   parseMcpInputSchemaProfile,
@@ -80,6 +82,16 @@ interface McpDoctorCheck {
 /** Diagnose the actual production stdio adapter with one startup-bounded SDK session. */
 export const runProductionMcpDoctor = async (options: McpDoctorOptions) => {
   const catalog = catalogIdentityForEnvironment(options.environment);
+  const selected = parseMcpToolFamilies(options.environment.REA_MCP_TOOL_FAMILIES);
+  const advertisedFamilies =
+    selected.ok && selected.value !== undefined
+      ? new Set(selected.value)
+      : undefined;
+  const expectedToolNames = TOOL_CONTRACTS.filter(({ name }) => {
+    if (advertisedFamilies === undefined) return true;
+    const family = toolFamilyId(name);
+    return family !== undefined && advertisedFamilies.has(family);
+  }).map(({ name }) => name);
   const deadline =
     performance.now() +
     (options.deadlineMs ?? MCP_STARTUP_POLICY.doctorDeadlineMs);
@@ -110,6 +122,7 @@ export const runProductionMcpDoctor = async (options: McpDoctorOptions) => {
       deadline,
       controller.signal,
       catalog,
+      expectedToolNames,
     );
   } catch (cause: unknown) {
     result = {
@@ -196,6 +209,7 @@ const inspectProductionMcpSession = async (
   deadline: number,
   signal: AbortSignal,
   catalog: ReturnType<typeof createCatalogIdentity>,
+  expectedToolNames: readonly string[],
 ) => {
   const request = requestOptions(deadline, signal);
   const [tools, prompts] = await Promise.all([
@@ -216,7 +230,7 @@ const inspectProductionMcpSession = async (
     );
   const inventory = {
     tools: compareInventory(
-      TOOL_CONTRACTS.map(({ name }) => name),
+      expectedToolNames,
       tools.tools.map(({ name }) => name),
     ),
     prompts: compareInventory(
