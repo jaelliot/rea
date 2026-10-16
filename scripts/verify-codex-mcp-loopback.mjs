@@ -36,7 +36,7 @@ const fixture = createServer(async (req, res) => {
     if (req.method === "GET" && path === "/v1/models") {
       res.setHeader("Content-Type", "application/json");
       res.end(JSON.stringify({ object: "list", data: [
-        { id: "gpt-5.6-terra", object: "model", owned_by: "local-synthetic-fixture" },
+        { id: "gpt-5.4", object: "model", owned_by: "local-synthetic-fixture" },
       ] }));
       return;
     }
@@ -130,7 +130,7 @@ try {
   await mkdir(codexHome, { mode: 0o700 });
   await mkdir(home, { mode: 0o700 });
   const configuration = [
-    'model = "gpt-5.6-terra"',
+    'model = "gpt-5.4"',
     'model_provider = "rea_fixture"',
     'approval_policy = "never"',
     'sandbox_mode = "read-only"',
