@@ -96,6 +96,12 @@ this session, determined them.
 | Caching          | Every operation is `live`: project edits between sessions do not change the artifact or profile identity, so results are re-observed rather than replayed from analysis snapshots.                                                                                                                                                                                                                                                                                                                                                                                   |
 | Admitted targets | Targets whose ephemeral profile needs REA's own import preparation are refused: raw binaries, DOS MZ/COM, PSP, MIPS soft-float, and provider-pinned MIPS/RISC-V/PowerPC languages. `REA_GHIDRA_LANGUAGE_ID`, `REA_GHIDRA_COMPILER_SPEC_ID`, `REA_GHIDRA_SEED_FILE`, `REA_GHIDRA_DISABLED_ANALYZERS` and `REA_GHIDRA_NATIVEAOT_JAR` cannot be combined with a persistent project.                                                                                                                                                                                     |
 
+A saved Program may also contain a historical `REA analysis seeds` report from
+its original preparation. The report is retained as project provenance, with
+its seed digest and entry count, not interpreted as a seed file applied by the
+current read-only session. Fresh imports still reject missing, foreign, or
+unexpected seed outcomes according to their own committed profile.
+
 A missing project, a Program path that does not exist in the project, or a
 project another Ghidra instance has open makes `analyzeHeadless` exit before
 the bridge starts; the session failure retains its output. The Program path uses
