@@ -1,0 +1,82 @@
+name: Fork actual Codex REA MCP tool-call acceptance with local model fixture
+
+on:
+  push:
+    branches:
+      - codex/rea-codex-loopback-routing-025
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fork-rea-codex-loopback-routing-025
+  cancel-in-progress: true
+
+jobs:
+  codex-mcp:
+    if: github.repository == 'jaelliot/rea'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      HUSKY: "0"
+      TURBO_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Build pinned REA and validate source contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rev-parse HEAD
+          node --version
+          npm --version
+          npm ci
+          npm run build:cached
+          npm run test:prepare
+          node --check scripts/verify-codex-rea-mcp.mjs
+          node --check scripts/verify-codex-mcp-loopback.mjs
+          npx vitest run src/contracts/toolFamilies.test.ts tests/conformance/contracts/mcpToolFamilies.test.ts tests/boundary/mcp/toolFamiliesMcp.test.ts tests/evaluation/model-evals/codexAgentEval.test.ts
+          npm run check:fast -- --force
+      - name: Acquire exact Codex CLI in ephemeral runner directory
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/codex-bin" "$RUNNER_TEMP/rea-codex-results"
+          npm install --prefix "$RUNNER_TEMP/codex-bin" --no-audit --no-fund --ignore-scripts @openai/codex@0.163.0
+          CODEX_BIN="$RUNNER_TEMP/codex-bin/node_modules/.bin/codex"
+          test -x "$CODEX_BIN"
+          "$CODEX_BIN" --version
+          echo "REA_CODEX_BIN=$CODEX_BIN" >> "$GITHUB_ENV"
+          npm ls --prefix "$RUNNER_TEMP/codex-bin" @openai/codex --depth=0 > "$RUNNER_TEMP/rea-codex-results/codex-package.txt"
+      - name: Actual Codex CLI registration and REA production stdio acceptance
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/verify-codex-rea-mcp.mjs "$REA_CODEX_BIN" "$RUNNER_TEMP/rea-codex-results/report.json"
+      - name: Actual Codex-initiated REA MCP call via local Responses fixture
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/verify-codex-mcp-loopback.mjs "$REA_CODEX_BIN" "$RUNNER_TEMP/rea-codex-results/loopback-report.json"
+      - name: Source cleanliness and receipt
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/rea-codex-results"
+          git rev-parse HEAD > "$RUNNER_TEMP/rea-codex-results/commit.txt"
+          git status --short > "$RUNNER_TEMP/rea-codex-results/status.txt"
+          git diff --check
+          git diff --exit-code
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: rea-codex-loopback-routing-025
+          path: ${{ runner.temp }}/rea-codex-results/
+          if-no-files-found: warn
+          retention-days: 5
