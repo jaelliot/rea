@@ -1,0 +1,48 @@
+name: Fork REA saved Ghidra seed report regression
+
+on:
+  push:
+    branches:
+      - codex/rea3817-seed-provenance-016
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fork-rea3817-seed-provenance-016
+  cancel-in-progress: true
+
+jobs:
+  historical-seeds:
+    if: github.repository == 'jaelliot/rea'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      HUSKY: "0"
+      TURBO_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Build pinned source and record toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rev-parse HEAD
+          node --version
+          npm --version
+          npm ci
+          npm run build:cached
+          npm run test:prepare
+      - name: Focused historical seed-report acceptance
+        run: npx vitest run src/ghidra/GhidraProvider.behavior.test.ts src/ghidra/GhidraAnalysisSeeds.test.ts
+      - name: Fresh typecheck and lint
+        if: always()
+        run: npm run check:fast -- --force
+      - name: Source cleanliness
+        if: always()
+        run: git diff --exit-code && git diff --check
