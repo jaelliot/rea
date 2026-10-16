@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -36,7 +36,7 @@ const fixture = createServer(async (req, res) => {
     if (req.method === "GET" && path === "/v1/models") {
       res.setHeader("Content-Type", "application/json");
       res.end(JSON.stringify({ object: "list", data: [
-        { id: "rea-loopback", object: "model", owned_by: "local-synthetic-fixture" },
+        { id: "gpt-5.6-terra", object: "model", owned_by: "local-synthetic-fixture" },
       ] }));
       return;
     }
@@ -125,7 +125,7 @@ try {
   await mkdir(codexHome, { mode: 0o700 });
   await mkdir(home, { mode: 0o700 });
   const configuration = [
-    'model = "rea-loopback"',
+    'model = "gpt-5.6-terra"',
     'model_provider = "rea_fixture"',
     'approval_policy = "never"',
     'sandbox_mode = "read-only"',
@@ -173,6 +173,14 @@ try {
   for (const name of ["OPENAI_API_KEY", "CODEX_API_KEY",
     "CHATGPT_SESSION_TOKEN", "OPENAI_BASE_URL", "AZURE_OPENAI_API_KEY"])
     delete env[name];
+  const registration = spawnSync(cli, ["mcp", "list", "--json"], {
+    cwd: scratch, env, encoding: "utf8", timeout: 15000,
+  });
+  assert.equal(registration.status, 0,
+    "Codex did not parse isolated MCP registration: " + registration.stderr);
+  const servers = JSON.parse(registration.stdout);
+  assert.ok(servers.some((s) => s.name === "rea" && s.enabled === true),
+    "Codex did not register the REA server in its isolated home");
   const outputFile = join(scratch, "answer.txt");
   const args = [
     "--no-daemon", "exec", "--strict-config", "--ephemeral",
