@@ -38,8 +38,13 @@ jobs:
           npm ci
           npm run build:cached
           npm run test:prepare
-      - name: Focused real-stdio scoped doctor regressions
-        run: npx vitest run tests/boundary/mcp/mcpDoctorToolFamiliesMcp.test.ts
+      - name: Focused production MCP contract and doctor regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx vitest run tests/boundary/mcp/mcpDoctorToolFamiliesMcp.test.ts tests/boundary/mcp/mcpDoctor.test.ts tests/boundary/mcp/toolFamiliesMcp.test.ts src/contracts/toolFamilies.test.ts tests/conformance/contracts/mcpToolFamilies.test.ts
+          npm run verify:test-discovery
+          npm run docs:check
       - name: Fresh typecheck and lint
         run: npm run check:fast -- --force
       - name: Source cleanliness
