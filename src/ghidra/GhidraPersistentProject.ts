@@ -6,6 +6,7 @@ import type { AnalysisOperation } from "../application/AnalysisProvider.js";
 import {
   GHIDRA_PROJECT_FILE_SUFFIX,
   ghidraProgramPathSchema,
+  ghidraProjectFileSchema,
   type GhidraPersistentProject,
 } from "../config/ghidraPersistentProject.js";
 import { AnalysisUnsupportedTargetError } from "../domain/analysisErrorCore.js";
@@ -102,6 +103,8 @@ export const resolveGhidraPersistentProject = async (
       throw new Error(
         `The resolved project marker is not a ${GHIDRA_PROJECT_FILE_SUFFIX} file`,
       );
+    if (!ghidraProjectFileSchema.safeParse(projectFile).success)
+      throw new Error("The resolved project marker path cannot be selected unchanged by Ghidra");
     if (!(await stat(projectFile)).isFile())
       throw new Error("The project marker is not a regular file");
     const repository = `${projectFile.slice(0, -GHIDRA_PROJECT_FILE_SUFFIX.length)}.rep`;
