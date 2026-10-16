@@ -86,6 +86,13 @@ describe("BinarySession open liveness", () => {
       value: { result: "old_saved_project_name" },
     });
     expect(deep.created).toHaveLength(1);
+    const firstProfile = session.analysisProfile();
+    if (firstProfile === undefined) throw new Error("Missing first analysis profile");
+    const firstSnapshot = session.exportAnalysisSnapshot();
+    if (!firstSnapshot.ok) throw firstSnapshot.error;
+    // Within one living copy, repeated immutable queries remain cached.
+    expect((await session.execute("address_name", input)).ok).toBe(true);
+    expect(deep.created[0]?.queryCalls).toBe(1);
 
     projectSource.functionName = "new_saved_project_name";
     deep.created[0]?.kill();
@@ -98,6 +105,21 @@ describe("BinarySession open liveness", () => {
       value: { result: "new_saved_project_name" },
     });
     expect(deep.created).toHaveLength(2);
+    const replacementProfile = session.analysisProfile();
+    expect(replacementProfile?.digest).not.toBe(firstProfile.digest);
+    expect(replacementProfile?.provider).toEqual(firstProfile.provider);
+    // Restart invalidates the prior copy's snapshot profile, not every
+    // immutable answer in the newly established copy.
+    expect((await session.execute("address_name", input)).ok).toBe(true);
+    expect(deep.created[1]?.queryCalls).toBe(1);
+    const rejected = await session.open(process.execPath, {
+      snapshot: firstSnapshot.value,
+    });
+    expect(rejected).toMatchObject({
+      ok: false,
+      error: { _tag: "AnalysisSnapshotMismatchError" },
+    });
+    expect(session.analysisProfile()?.digest).toBe(replacementProfile?.digest);
     await session.close();
   });
 
@@ -309,6 +331,7 @@ interface KillableChild extends AnalysisClient {
   setOperationFailure(value: boolean): void;
   closeCalled: boolean;
   healthCalls: number;
+  queryCalls: number;
 }
 
 const deepIdentity: ProviderIdentity = {
@@ -433,11 +456,13 @@ const killableDeepProvider = (options: {
         firstClient && options.failOperationInitially === true;
       let closeCalled = false;
       let healthCalls = 0;
+      let queryCalls = 0;
       let deadState: "exited" | "unreachable" | "unknown" | "not_started" =
         "exited";
       const client: KillableChild = {
         execute: (operation) => {
           if (operation === "health") healthCalls += 1;
+          else queryCalls += 1;
           return alive && !(operation !== "health" && failOperation)
             ? Promise.resolve(
                 ok(
@@ -484,6 +509,9 @@ const killableDeepProvider = (options: {
         },
         get healthCalls() {
           return healthCalls;
+        },
+        get queryCalls() {
+          return queryCalls;
         },
         kill: (
           state:
