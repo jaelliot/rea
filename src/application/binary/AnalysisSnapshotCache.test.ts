@@ -722,3 +722,18 @@ it("revises the trace_feature workflow profile so earlier results are not replay
     "other workflows keep their profile",
   ).toEqual(workflowAnalysisProfile(profile));
 });
+
+it("revises inspect_native_api only when computed-branch inventory semantics change", () => {
+  const upstream = ANALYSIS_SNAPSHOT_PROFILE;
+  const before = workflowAnalysisProfile(upstream);
+  const after = workflowAnalysisProfile(upstream, "inspect_native_api");
+
+  expect(before.parameters.workflow_revision).toBe(1);
+  expect(after.parameters).toMatchObject({
+    upstream_analysis_profile: upstream,
+    source_limitations: "provider-operation-caveats-v1",
+    workflow_revision: 2,
+  });
+  expect(after.digest).not.toBe(before.digest);
+  expect(workflowAnalysisProfile(upstream, "inspect_native_dispatch_metadata")).toEqual(before);
+});
