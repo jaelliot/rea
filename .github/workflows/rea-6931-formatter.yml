@@ -1,0 +1,30 @@
+name: REA 6931 verifier formatting probe
+on:
+  push:
+    branches:
+      - codex/rea-6931-formatter-20261023
+permissions:
+  contents: read
+jobs:
+  format:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      HUSKY: "0"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          submodules: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .nvmrc
+      - run: npm ci
+      - name: Format only PSP verifier and emit exact formatted content
+        shell: bash
+        run: |
+          ./node_modules/.bin/oxfmt scripts/verify-real-ghidra-psp-indirect.mjs
+          git diff --check
+          git diff --stat
+          echo REA_FORMATTED_BEGIN
+          node -e "process.stdout.write(require('node:fs').readFileSync('scripts/verify-real-ghidra-psp-indirect.mjs').toString('base64')+'\n')"
+          echo REA_FORMATTED_END
