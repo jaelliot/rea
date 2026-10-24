@@ -1,0 +1,33 @@
+name: REA 6931 CI shard 3 memory replay
+on:
+  push:
+    branches:
+      - codex/rea-6931-ci-shard3-replay-20261023
+
+permissions:
+  contents: read
+
+env:
+  HUSKY: "0"
+
+jobs:
+  isolate-shard:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          submodules: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .nvmrc
+      - name: Install pinned dependencies
+        run: npm ci
+      - name: Build and prepare exact PR source
+        run: npm run test:prepare
+      - name: Reproduce isolated fast built test shard 3/8
+        run: npm run test:built -- --reporter=default --reporter=blob --shard=3/8
+        env:
+          VITEST_BLOB_LABEL: built
+      - name: Explicit pcap CLI regression
+        run: npm run test:focused -- tests/boundary/cli/pcapCli.test.ts
