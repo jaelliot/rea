@@ -1,0 +1,31 @@
+name: REA 5129 record-pairs refresh checks
+on:
+  push:
+    branches:
+      - codex/rea-5129-file-pairs-verify-20261023
+permissions:
+  contents: read
+jobs:
+  focused:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      HUSKY: "0"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          submodules: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .nvmrc
+      - run: npm ci
+      - name: Exact CLI, MCP and filesystem regression tests
+        run: npm run test:focused -- tests/boundary/cli/bundleComparisonCli.test.ts tests/boundary/mcp/bundleComparisonMcp.test.ts tests/boundary/filesystem/evidenceBundleFiles.test.ts
+      - name: Typecheck and lint
+        run: npm run check:fast
+      - name: Format
+        run: npm run format:check
+      - name: Docs
+        run: npm run docs:check
+      - name: Test discovery
+        run: npm run verify:test-discovery
