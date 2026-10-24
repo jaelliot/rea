@@ -1,0 +1,109 @@
+name: Fork PSP #6931 Ghidra feature integration
+
+on:
+  push:
+    branches:
+      - codex/rea-psp-6931-feature-validation-20261023
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fork-rea-psp-indirect-ghidra-020
+  cancel-in-progress: true
+
+jobs:
+  real-psp:
+    if: github.repository == 'jaelliot/rea'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      HUSKY: "0"
+      TURBO_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Pin source and run REA contract tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rev-parse HEAD
+          node --version
+          npm --version
+          npm ci
+          npm run build:cached
+          npm run test:prepare
+          node --check scripts/verify-real-ghidra-psp-indirect.mjs
+          npx vitest run tests/conformance/ghidra/psp-checks.test.ts src/application/native/NativeApiInspection.test.ts src/ghidra/GhidraFunctionValues.test.ts
+          npm run check:fast -- --force
+      - name: Provision checksum-pinned PSP and Allegrex toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${JAVA_HOME_21_X64:-}"
+          echo "JAVA_HOME=$JAVA_HOME_21_X64" >> "$GITHUB_ENV"
+          "$JAVA_HOME_21_X64/bin/java" -version
+          sudo apt-get update -qq
+          sudo apt-get install --no-install-recommends -y binutils libgmp10 libmpfr6 libmpc3 libreadline-dev libusb-dev
+          mkdir -p "$RUNNER_TEMP/psp-results" "$RUNNER_TEMP/psp-runtime" "$RUNNER_TEMP/psp-tools"
+          curl --fail --location --retry 2 --max-time 360 'https://github.com/NationalSecurityAgency/ghidra/releases/download/Ghidra_12.1.3_build/ghidra_12.1.3_PUBLIC_20260817.zip' -o "$RUNNER_TEMP/psp-ghidra.zip"
+          echo "93a5d11a9ad510622acaaf908c556a7b9b764d338e78a7567f3689bf5081fd54  $RUNNER_TEMP/psp-ghidra.zip" | sha256sum --check
+          unzip -q "$RUNNER_TEMP/psp-ghidra.zip" -d "$RUNNER_TEMP/psp-tools"
+          GHIDRA_DIR="$RUNNER_TEMP/psp-tools/ghidra_12.1.3_PUBLIC"
+          test -x "$GHIDRA_DIR/support/analyzeHeadless"
+          echo "GHIDRA_INSTALL_DIR=$GHIDRA_DIR" >> "$GITHUB_ENV"
+          curl --fail --location --retry 2 --max-time 360 'https://github.com/pspdev/pspdev/releases/download/v20261001/pspdev-ubuntu-latest-x86_64.tar.gz' -o "$RUNNER_TEMP/pspdev.tar.gz"
+          echo "a86efe624e770005290919617859e9df24bd8fcd3e364f4587f23ec7364b0acd  $RUNNER_TEMP/pspdev.tar.gz" | sha256sum --check
+          tar -xzf "$RUNNER_TEMP/pspdev.tar.gz" -C "$RUNNER_TEMP/psp-tools"
+          PSPDEV_DIR="$RUNNER_TEMP/psp-tools/pspdev"
+          test -x "$PSPDEV_DIR/bin/psp-gcc"
+          echo "PSPDEV=$PSPDEV_DIR" >> "$GITHUB_ENV"
+          echo "$PSPDEV_DIR/bin" >> "$GITHUB_PATH"
+          echo "TMPDIR=$RUNNER_TEMP/psp-runtime" >> "$GITHUB_ENV"
+          curl --fail --location --retry 2 --max-time 180 'https://github.com/kotcrab/ghidra-allegrex/releases/download/v21.4/ghidra_12.1.3_PUBLIC_20260825_ghidra-allegrex.zip' -o "$RUNNER_TEMP/allegrex.zip"
+          echo "62e829fa9e6ed6f2bd343763fb339a3f8812b02a4e0ed5a9409b14007b408243  $RUNNER_TEMP/allegrex.zip" | sha256sum --check
+          sha256sum "$RUNNER_TEMP/psp-ghidra.zip" "$RUNNER_TEMP/pspdev.tar.gz" "$RUNNER_TEMP/allegrex.zip" > "$RUNNER_TEMP/psp-results/tool-archives.sha256"
+      - name: Existing PSP missing-extension refusal control
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/verify-real-ghidra-mips.mjs --psp-missing-extension 2>&1 | tee "$RUNNER_TEMP/psp-results/missing-extension.log"
+      - name: Install compatible extension only in disposable Ghidra
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$GHIDRA_INSTALL_DIR/Ghidra/Extensions"
+          unzip -q "$RUNNER_TEMP/allegrex.zip" -d "$GHIDRA_INSTALL_DIR/Ghidra/Extensions"
+          test -f "$GHIDRA_INSTALL_DIR/Ghidra/Extensions/ghidra-allegrex/extension.properties"
+      - name: Existing unchanged PSP acceptance baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/verify-real-ghidra-mips.mjs --psp 2>&1 | tee "$RUNNER_TEMP/psp-results/psp-baseline.log"
+      - name: New source-owned PSP indirect branch observations and snapshot
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/verify-real-ghidra-psp-indirect.mjs 2>&1 | tee "$RUNNER_TEMP/psp-results/indirect-branch.json"
+      - name: Source and runtime hygiene receipt
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/psp-results"
+          git rev-parse HEAD > "$RUNNER_TEMP/psp-results/source-commit.txt"
+          git status --short > "$RUNNER_TEMP/psp-results/git-status.txt"
+          git diff --check
+          git diff --exit-code
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: rea-psp-indirect-ghidra-020
+          path: ${{ runner.temp }}/psp-results/
+          if-no-files-found: warn
+          retention-days: 5
