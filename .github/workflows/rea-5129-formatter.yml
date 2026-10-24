@@ -1,0 +1,27 @@
+name: REA 5129 focused test formatter
+on:
+  push:
+    branches:
+      - codex/rea-5129-formatter-20261023
+permissions:
+  contents: read
+jobs:
+  format:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      HUSKY: "0"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .nvmrc
+      - run: npm ci
+      - name: Format only Evidence CLI regression file
+        run: |
+          ./node_modules/.bin/oxfmt tests/boundary/cli/bundleComparisonCli.test.ts
+          git diff --check
+          git diff --stat
+          echo REA_5129_FORMAT_BEGIN
+          node -e "process.stdout.write(require('node:fs').readFileSync('tests/boundary/cli/bundleComparisonCli.test.ts').toString('base64')+'\n')"
+          echo REA_5129_FORMAT_END
