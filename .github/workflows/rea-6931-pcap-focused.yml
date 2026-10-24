@@ -1,0 +1,27 @@
+name: REA 6931 pcap CLI single-file reproduction
+on:
+  push:
+    branches:
+      - codex/rea-6931-pcap-focused-20261023
+
+permissions:
+  contents: read
+
+env:
+  HUSKY: "0"
+
+jobs:
+  pcap-cli:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          submodules: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .nvmrc
+      - name: Install exact PR dependencies
+        run: npm ci
+      - name: Run unchanged failing-file controls
+        run: npm run test:focused -- tests/boundary/cli/pcapCli.test.ts
