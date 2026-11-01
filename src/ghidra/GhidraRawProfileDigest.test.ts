@@ -6,12 +6,13 @@ import { silentLogger } from "../logger.js";
 import { ghidraProfileInstallationHost as host } from "./GhidraInstallation.fixture.js";
 import { GhidraProvider } from "./GhidraProvider.js";
 
-// Digests were computed by the unmodified upstream resolver (3ae7daa10,
-// raw branch inline) and must not change when the binary-loader policy is shared.
+// The indirect-branch inventory changes Ghidra analysis results and intentionally
+// invalidates older raw-profile snapshots. Pin the revised profile digests so
+// incidental changes to these result-affecting commitments remain visible.
 const RAW_DIGESTS = {
-  "6502": "adbec31711f31471f9cdbdbb2fc743a0ce6b46c9be5568bf90a3f51ef46e376d",
+  "6502": "bf9b7739459155d9bfe796acf90eb640d4ea69c1ea702a685fdaae3400aeeb8e",
   "x86-disabled-analyzer":
-    "493a02888eca575be286b5a96041af8007444586854edb974d6a0c12fd2768c4",
+    "9fcf47acfe448d2ee50f0d675dff4861f5c2b0c22d5d9f9438562af86f4b9cfa",
 } as const;
 
 const configFor = (environment: NodeJS.ProcessEnv) => {
@@ -33,7 +34,7 @@ const raw = (architecture: "6502" | "x86", entryPoint: string): BinaryTarget =>
   }) as unknown as BinaryTarget;
 
 describe("raw-binary analysis profile digest", () => {
-  it("keeps the 6502 raw profile digest from before the shared policy refactor", async () => {
+  it("pins the 6502 raw profile after the indirect-branch inventory change", async () => {
     const ghidra = new GhidraProvider(configFor({}), silentLogger, {}, host);
     const resolved = await ghidra.resolveAnalysisProfile(raw("6502", "0x8001"));
     if (!resolved.ok) throw resolved.error;
@@ -45,10 +46,12 @@ describe("raw-binary analysis profile digest", () => {
       language_selection: "caller-supplied-v1",
       load_image_evidence: "independent-raw-mapping-context-v4",
       analyzer_preset: "ghidra-default",
+      indirect_branch_inventory:
+        "listing-computed-jumps-decompiler-comment-warnings-bounded-v2",
     });
   });
 
-  it("keeps the disabled-analyzer raw digest and its analysis options", async () => {
+  it("pins the disabled-analyzer raw digest and its analysis options", async () => {
     const ghidra = new GhidraProvider(
       configFor({
         REA_GHIDRA_DISABLED_ANALYZERS: "Aggressive Instruction Finder",
@@ -66,6 +69,8 @@ describe("raw-binary analysis profile digest", () => {
       analysis_options: {
         disabled_analyzers: ["Aggressive Instruction Finder"],
       },
+      indirect_branch_inventory:
+        "listing-computed-jumps-decompiler-comment-warnings-bounded-v2",
     });
   });
 });
