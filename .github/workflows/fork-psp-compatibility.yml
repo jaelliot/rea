@@ -18,9 +18,9 @@ jobs:
       matrix:
         include:
           - feature: vfpu
-            source_sha: afa7d4319484ccaf4d3bc429483c68dea4e947cd
+            source_sha: 84838246461383fc656a5fc96cd5cc0c0c62acdf
           - feature: symbols
-            source_sha: 95afae42a6ff53129c0b6a868ae47f8690ab5a07
+            source_sha: 008cd17a1cd70cf2c42bb14fdfc0c5c379e9a069
     env:
       HUSKY: "0"
       TURBO_TELEMETRY_DISABLED: "1"
