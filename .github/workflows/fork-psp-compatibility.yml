@@ -18,9 +18,9 @@ jobs:
       matrix:
         include:
           - feature: vfpu
-            source_sha: 43479c656d041fb538328f234280f6280c26f1c9
+            source_sha: afa7d4319484ccaf4d3bc429483c68dea4e947cd
           - feature: symbols
-            source_sha: 94e578aa5db00b05695f371341beeb0282d6a7a3
+            source_sha: 95afae42a6ff53129c0b6a868ae47f8690ab5a07
     env:
       HUSKY: "0"
       TURBO_TELEMETRY_DISABLED: "1"
@@ -46,8 +46,19 @@ jobs:
             node scripts/verify-psp-symbol-correlation.mjs
           fi
           npm ci
+          if test -f scripts/verify-psp-symbol-correlation.mjs; then
+            format_files=(scripts/psp-symbol-correlation.mjs scripts/verify-psp-symbol-correlation.mjs scripts/verify-real-ghidra-mips.mjs docs/ghidra-psp.md knip.json)
+          else
+            format_files=(tests/conformance/ghidra/psp-fixture.mjs scripts/verify-real-ghidra-mips.mjs docs/ghidra-psp.md)
+          fi
+          if ! ./node_modules/.bin/oxfmt --check "${format_files[@]}"; then
+            ./node_modules/.bin/oxfmt "${format_files[@]}"
+            git diff -- "${format_files[@]}"
+            exit 1
+          fi
           npm run build:cached
           npm run check:fast
+          npm run docs:check
       - name: Provision checksum-verified source-owned PSP toolchain
         shell: bash
         run: |
