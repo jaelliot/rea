@@ -17,11 +17,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - feature: symbols-current
-            source_sha: 3b64bca0380ab2f7e37981166795beea22bd2ba2
-            baseline: false
-          - feature: symbols-with-baseline
-            source_sha: 87bf0aa7a93387cb80b699358966d4a5fdc72087
+          - feature: vfpu-refreshed
+            source_sha: 36f1fed4f5b49290e3420d23e88600d9e55229d7
+            baseline: true
+          - feature: symbols-refreshed
+            source_sha: 4969685685f41376ee356a316f542756976cf435
             baseline: true
     env:
       HUSKY: "0"
