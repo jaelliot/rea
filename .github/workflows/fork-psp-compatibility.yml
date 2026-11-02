@@ -17,8 +17,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - feature: symbols-review
+          - feature: symbols-current
             source_sha: 3b64bca0380ab2f7e37981166795beea22bd2ba2
+            baseline: false
+          - feature: symbols-with-baseline
+            source_sha: 87bf0aa7a93387cb80b699358966d4a5fdc72087
+            baseline: true
     env:
       HUSKY: "0"
       TURBO_TELEMETRY_DISABLED: "1"
@@ -58,6 +62,7 @@ jobs:
           npm run check:fast
           npm run docs:check
       - name: Confirm upstream baseline repairs on the integrated source
+        if: matrix.baseline == true
         shell: bash
         run: |
           set -euo pipefail
