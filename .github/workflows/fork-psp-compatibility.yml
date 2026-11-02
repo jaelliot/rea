@@ -18,7 +18,7 @@ jobs:
       matrix:
         include:
           - feature: symbols-review
-            source_sha: c709d4235ab31d2be2711fcd4e13401fb1fd7607
+            source_sha: 3b64bca0380ab2f7e37981166795beea22bd2ba2
     env:
       HUSKY: "0"
       TURBO_TELEMETRY_DISABLED: "1"
