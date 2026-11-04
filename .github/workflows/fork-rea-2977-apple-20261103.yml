@@ -1,0 +1,42 @@
+name: Fork REA 2977 Apple Mach-O timeout isolation
+
+on:
+  push:
+    branches: [ci/rea-2977-apple-20261103]
+    paths: [.github/workflows/fork-rea-2977-apple-20261103.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  native-macho-boundary:
+    if: github.repository == 'jaelliot/rea'
+    runs-on: macos-15
+    timeout-minutes: 15
+    env:
+      HUSKY: "0"
+      TURBO_TELEMETRY_DISABLED: "1"
+      SOURCE_SHA: 150f6f2123e0ce698107b8cd2402dcdd655f556f
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ env.SOURCE_SHA }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Build exact candidate from pinned dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          npm ci
+          npm run build:cached
+      - name: Reproduce prior failing Mach-O MCP test in isolation
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run test:focused -- tests/boundary/mcp/nativeMachoSummaryMcp.test.ts
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          git diff --exit-code
