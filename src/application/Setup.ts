@@ -27,10 +27,14 @@ import {
   hostRemediation,
   systemSetupHost,
 } from "./SetupHost.js";
-import { AnalysisError } from "../domain/analysisErrorBase.js";
+import {
+  AnalysisError,
+  type AnalysisCleanupObservation,
+} from "../domain/analysisErrorBase.js";
+import { setupCleanupError, setupCleanupReason } from "./SetupCleanupOwner.js";
 import { analysisErrorWithCleanupFailure } from "../domain/analysisErrorCleanup.js";
-import { ProviderCleanupError } from "../domain/providerCleanupError.js";
 import type { SetupSkillInstallError } from "./SetupSkill.js";
+import type { SetupHopperInstallFailure } from "./SetupInstallFailure.js";
 
 /** Discover, approve, and apply setup actions idempotently. */
 export const runSetup = async (
@@ -48,42 +52,47 @@ export const runSetup = async (
     primaryFailure = cause;
   }
 
-  let cleanupFailure: string | undefined;
+  let cleanup: AnalysisError | undefined;
   try {
-    cleanupFailure = await host.close?.();
+    const report = await host.close?.();
+    cleanup = report === undefined ? undefined : setupCleanupError(report);
   } catch (cause: unknown) {
-    cleanupFailure = `Setup resource cleanup failed: ${failureMessage(cause)}`;
+    cleanup = setupCleanupError(cause);
   }
-
+  if (cleanup !== undefined && !cleanup.cleanupIncomplete) cleanup = undefined;
   if (threw) {
-    if (cleanupFailure !== undefined && primaryFailure instanceof AnalysisError)
+    if (cleanup === undefined) throw primaryFailure;
+    if (primaryFailure instanceof AnalysisError)
       throw analysisErrorWithCleanupFailure(
         primaryFailure,
-        new ProviderCleanupError(
-          "setup",
-          primaryFailure.cleanupResources,
-          { reason: cleanupFailure },
-          { operation: "setup" },
-        ),
+        cleanup,
         "setup",
-      );
-    if (cleanupFailure !== undefined)
-      throw new AggregateError(
-        [primaryFailure, new Error(cleanupFailure)],
-        "Setup and resource cleanup failed.",
-        { cause: primaryFailure },
-      );
-    throw primaryFailure;
+      ).bindCleanupDependencies([primaryFailure, cleanup]);
+    throw new AggregateError(
+      [primaryFailure, cleanup],
+      "Setup and resource cleanup failed.",
+      { cause: primaryFailure },
+    );
   }
   if (result === undefined) throw new Error("Setup returned no result.");
-  if (cleanupFailure === undefined) return result;
+  if (cleanup === undefined) return result;
+  const cleanupReason = setupCleanupReason(cleanup);
+  const cleanupReport: AnalysisCleanupObservation = {
+    reason: cleanupReason,
+    get resources() {
+      return cleanup.cleanupResources;
+    },
+  };
   return {
     ...result,
     status: "needs_human",
     code: result.code ?? "cleanup_failed",
+    get cleanup() {
+      return cleanup.cleanupIncomplete ? cleanupReport : undefined;
+    },
     remediation: result.remediation
-      ? `${result.remediation} ${cleanupFailure}`
-      : cleanupFailure,
+      ? `${result.remediation} ${cleanupReason}`
+      : cleanupReason,
   };
 };
 
@@ -122,6 +131,14 @@ const runSetupWorkflow = async (
       options.proposeHopper ?? (confirm !== undefined && !options.structured),
     initialDoctor: initialState.doctor,
   });
+  // The advertised family scope is a registration setting, not a detected
+  // provider fact; merge it after discovery so it cannot suppress the
+  // Hopper installation offer on an otherwise unconfigured machine.
+  if (options.toolFamilies !== undefined)
+    providerEnvironment = {
+      ...providerEnvironment,
+      REA_MCP_TOOL_FAMILIES: options.toolFamilies,
+    };
   clientStates = discovery.clientStates;
   const clientSelectionAllowed =
     options.clientIds === undefined &&
@@ -153,17 +170,10 @@ const runSetupWorkflow = async (
   let installSkill = skillSelected && skillNeedsInstall;
   let planDiscovery = discovery;
   if (interactiveSelection) {
-    const selectionSkillClientIds = [
-      ...new Set([
-        ...discovery.defaultClientIds,
-        ...discovery.detectedClientIds,
-      ]),
-    ];
-    const selectionSkillNeedsInstall = await host.skillNeedsInstall(
-      selectionSkillClientIds,
-    );
-    const offerSkillAction =
-      options.installSkill !== false && selectionSkillNeedsInstall;
+    // The skill choice is intent; its final destination is determined after
+    // selecting clients. An empty client selection names the shared CLI copy.
+    const selectionSkillClientIds: readonly string[] = [];
+    const offerSkillAction = options.installSkill !== false;
     const selectionActions = await planSetupActions({
       discovery,
       host,
@@ -211,10 +221,15 @@ const runSetupWorkflow = async (
         options.installHopper ||
         (proposedInstallAction && selectedActionIds.has("install_hopper")),
     };
+    // The offered skill action can carry a client-specific ID (for example
+    // `install_skill:claude_code`); without a selected client it means the
+    // shared CLI skill.
+    const skillActionSelected = selectionActions.plannedActions.some(
+      ({ id, kind }) => kind === "install_skill" && selectedActionIds.has(id),
+    );
     skillSelected =
       options.installSkill === true ||
-      (selectedActionIds.has("install_skill") &&
-        selectedClientIds.length === 0) ||
+      (skillActionSelected && selectedClientIds.length === 0) ||
       (options.installSkill !== false && selectedClientIds.length > 0);
     installSkill = skillSelected && skillNeedsInstall;
     selectedSkillClientIds = selectedClientIds;
@@ -312,6 +327,7 @@ const runSetupWorkflow = async (
   let selectedClients: readonly SetupClient[] =
     planSelection.clientsToConfigure;
   let hopperWarning: string | undefined;
+  let hopperFailure: SetupHopperInstallFailure | undefined;
   if (
     planSelection.installHopper &&
     (interactiveApproval || options.installHopper)
@@ -319,21 +335,20 @@ const runSetupWorkflow = async (
     const install = await installHopperAction({
       host,
       options,
-      plannedActions,
       appliedActions,
-      clients,
       selectedClients,
       providerEnvironment,
-      doctorScope: readinessScope,
-      clientStates,
     });
-    if ("failure" in install) return install.failure;
-    ({
-      hopperPath,
-      providerEnvironment,
-      selectedClients,
-      warning: hopperWarning,
-    } = install);
+    // Hopper is optional: a failed install still applies the client
+    // registrations and skill approved with it (#5113).
+    if ("failure" in install) hopperFailure = install.failure;
+    else
+      ({
+        hopperPath,
+        providerEnvironment,
+        selectedClients,
+        warning: hopperWarning,
+      } = install);
   }
   const clientFailure = await configureDetectedClients({
     host,
@@ -346,7 +361,21 @@ const runSetupWorkflow = async (
       ? {}
       : { onProgress: options.onProgress }),
   });
-  if (clientFailure !== undefined) return fail(clientFailure);
+  // A later failure must not hide a failed Hopper install: keep its repair
+  // steps, and its code when the later failure carries none.
+  const withHopperFailure = (result: SetupResult): SetupResult =>
+    hopperFailure === undefined
+      ? result
+      : {
+          ...result,
+          code: result.code ?? hopperFailure.code,
+          remediation:
+            combineRemediation(hopperFailure.remediation, result.remediation) ??
+            hopperFailure.remediation,
+          ...hopperDownload(hopperFailure),
+        };
+  if (clientFailure !== undefined)
+    return withHopperFailure(await fail(clientFailure));
   if (planSelection.installSkill) {
     const skillFailure = await installSkillAction(
       host,
@@ -355,18 +384,19 @@ const runSetupWorkflow = async (
       selectedSkillClientIds,
     );
     if (skillFailure !== undefined) {
-      return failSkill(skillFailure);
+      return withHopperFailure(await failSkill(skillFailure));
     }
   }
   const doctor = summarizeDoctor(await host.doctor(readinessScope));
   const remediation = combineRemediation(
-    finalSetupRemediation(
-      host.platform,
-      appliedActions.includes("installed_hopper"),
-      doctor.healthy,
-      // Offer --install-hopper only where the explicit installation gate accepts it.
-      hopperPath === undefined && planDiscovery.hopperInstall.supported,
-    ),
+    hopperFailure?.remediation ??
+      finalSetupRemediation(
+        host.platform,
+        appliedActions.includes("installed_hopper"),
+        doctor.healthy,
+        // Offer installation only where the explicit gate accepts it.
+        hopperPath === undefined && planDiscovery.hopperInstall.supported,
+      ),
     hopperWarning,
     manualRemediation,
   );
@@ -378,19 +408,23 @@ const runSetupWorkflow = async (
     doctor,
     clientStates,
     ...(remediation === undefined ? {} : { remediation }),
+    ...(hopperFailure === undefined
+      ? {}
+      : { code: hopperFailure.code, ...hopperDownload(hopperFailure) }),
   };
 };
+
+const hopperDownload = (
+  failure: SetupHopperInstallFailure,
+): Pick<SetupResult, "download"> =>
+  failure.download === undefined ? {} : { download: failure.download };
 
 const installHopperAction = async (input: {
   readonly host: SetupHost;
   readonly options: SetupOptions;
-  readonly plannedActions: readonly SetupAction[];
   readonly appliedActions: string[];
-  readonly clients: Readonly<Record<string, ClientConfigurationResult>>;
   readonly selectedClients: readonly SetupClient[];
   readonly providerEnvironment: SetupProviderEnvironment;
-  readonly doctorScope: DoctorScope | undefined;
-  readonly clientStates: readonly SetupClientState[];
 }) => {
   const label = "Hopper deep-analysis provider";
   emitProgress(input.options, {
@@ -406,18 +440,7 @@ const installHopperAction = async (input: {
       state: "failed",
       detail: installed.remediation,
     });
-    return {
-      failure: {
-        status: "needs_human" as const,
-        plannedActions: input.plannedActions,
-        appliedActions: input.appliedActions,
-        clients: input.clients,
-        doctor: summarizeDoctor(await input.host.doctor(input.doctorScope)),
-        clientStates: input.clientStates,
-        code: installed.code,
-        remediation: installed.remediation,
-      },
-    };
+    return { failure: installed };
   }
   input.appliedActions.push("installed_hopper");
   const warning = [installed.warning, installed.cleanupFailure]

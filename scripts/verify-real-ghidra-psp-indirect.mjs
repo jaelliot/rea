@@ -51,16 +51,17 @@ const origin = fileURLToPath(
 );
 const script = fileURLToPath(new URL("./rea.mjs", import.meta.url));
 const names = [
-  ["computed_dispatch", "rea_psp_computed_dispatch", 8, "jr"],
-  ["indirect_tail", "rea_psp_indirect_tail", 4, "jr"],
-  ["return_control", "rea_psp_return_control", 4, "jr"],
-  ["direct_control", "rea_psp_direct_control", 0, "j"],
+  ["computed_dispatch", "rea_psp_computed_dispatch", 8, "jr", "jump", true],
+  ["indirect_tail", "rea_psp_indirect_tail", 4, "jr", "jump", true],
+  ["return_control", "rea_psp_return_control", 4, "jr", "return", false],
+  ["direct_control", "rea_psp_direct_control", 0, "j", "jump", false],
 ];
 const digest = (bytes) => createHash("sha256").update(bytes).digest("hex");
 let report;
 let client;
 let transport;
 let stderr = "";
+const failures = [];
 try {
   await mkdir(runtime);
   const sourceDigests = {};
@@ -168,7 +169,14 @@ try {
   let computedListingBranches = 0;
   let preservedComputedBranches = 0;
   let originalDispatchInspection;
-  for (const [label, symbol, offset, expectedMnemonic] of names) {
+  for (const [
+    label,
+    symbol,
+    offset,
+    expectedMnemonic,
+    flowKind,
+    computed,
+  ] of names) {
     const entry = symbols[symbol];
     assert.ok(
       procedures.some(
@@ -184,6 +192,12 @@ try {
       listing.mnemonic,
       new RegExp("^" + expectedMnemonic + "$", "iu"),
     );
+    assert.equal(listing.flow.kind, flowKind, "Wrong flow kind: " + symbol);
+    assert.equal(
+      listing.flow.computed,
+      computed,
+      "Wrong computed flag: " + symbol,
+    );
 
     const functionResult = await call("analyze_function", { procedure: entry });
     assert.ok(functionResult.evidence?.evidence_id);
@@ -192,6 +206,11 @@ try {
     const nativeApi = inspection.value;
     if (label === "computed_dispatch") originalDispatchInspection = nativeApi;
     const boundary = nativeApi.boundary;
+    assert.equal(
+      boundary.available,
+      true,
+      "Native API boundary unavailable: " + symbol,
+    );
     const branches = boundary.available
       ? (boundary.unresolved_indirect_branches ?? [])
       : [];
@@ -203,14 +222,8 @@ try {
           (t) => BigInt(t.dispatch_address) === BigInt(address),
         )
       : false;
-    const computed = listing.flow.kind === "jump" && listing.flow.computed;
     if (computed) {
       computedListingBranches++;
-      assert.equal(
-        boundary.available,
-        true,
-        "Computed jump native API boundary unavailable: " + symbol,
-      );
       assert.equal(
         recovered,
         false,
@@ -338,15 +351,37 @@ try {
   };
 } catch (error) {
   if (stderr.length > 0) console.error(stderr);
-  throw error;
+  failures.push(error);
 } finally {
-  if (client !== undefined) await client.close();
-  if (transport !== undefined) await transport.close();
-  await rm(workspace, { recursive: true, force: true });
+  try {
+    if (client !== undefined) await client.close();
+  } catch (error) {
+    failures.push(error);
+  }
+  try {
+    if (transport !== undefined) await transport.close();
+  } catch (error) {
+    failures.push(error);
+  }
 }
-const completed = await completeVerifierRun(run);
-assertVerifierCleanupComplete(completed.process_lineage);
+let completed;
+try {
+  completed = await completeVerifierRun(run);
+  assertVerifierCleanupComplete(completed.process_lineage);
+} catch (error) {
+  failures.push(error);
+  throw new AggregateError(
+    failures,
+    `PSP verifier cleanup unverified; retained workspace: ${workspace}`,
+  );
+}
+if (failures.length > 0)
+  throw new AggregateError(
+    failures,
+    `PSP verifier failed; retained workspace: ${workspace}`,
+  );
 assert.ok(report, "Missing PSP indirect branch report");
+await rm(workspace, { recursive: true, force: true });
 process.stdout.write(
   JSON.stringify(
     {
