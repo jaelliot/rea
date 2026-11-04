@@ -17,12 +17,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - feature: vfpu-refreshed
-            source_sha: 36f1fed4f5b49290e3420d23e88600d9e55229d7
-            baseline: true
-          - feature: symbols-refreshed
-            source_sha: 4969685685f41376ee356a316f542756976cf435
-            baseline: true
+          - feature: symbols-review-fixes
+            source_sha: e930fb1c41165e4e8d5be2fcfc5ee5ad61a69174
+            baseline: false
     env:
       HUSKY: "0"
       TURBO_TELEMETRY_DISABLED: "1"
