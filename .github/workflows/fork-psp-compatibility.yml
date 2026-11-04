@@ -18,7 +18,7 @@ jobs:
       matrix:
         include:
           - feature: symbols-review-fixes
-            source_sha: e930fb1c41165e4e8d5be2fcfc5ee5ad61a69174
+            source_sha: 5d15b5b3687856f37b6a227f3cb7ca3225ebbc9d
             baseline: false
     env:
       HUSKY: "0"
