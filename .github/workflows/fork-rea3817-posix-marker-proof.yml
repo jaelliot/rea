@@ -1,0 +1,52 @@
+name: Fork-only REA #3817 POSIX marker verification
+
+on:
+  push:
+    branches:
+      - ci/rea3817-posix-marker-proof-20261104
+
+permissions:
+  contents: read
+
+jobs:
+  marker-path:
+    if: github.repository == 'jaelliot/rea'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      HUSKY: "0"
+      TURBO_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Verify exact candidate source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rev-parse HEAD
+          git diff --exit-code 91bc440f96df396c2595c9b43ae4bac98d95fcd4 HEAD -- src/config/ghidraExistingProject.ts src/ghidra/GhidraProjectSnapshot.ts tests/boundary/providers/ghidra/ghidraProjectSnapshot.test.ts
+      - name: Install and prepare repository tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci
+          npm run build:cached
+          npm run test:prepare
+      - name: Focused project-selection and launcher tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx vitest run tests/boundary/providers/ghidra/ghidraProjectSnapshot.test.ts tests/boundary/providers/ghidra/ghidraLauncher.test.ts
+          npm run verify:test-discovery
+      - name: Static and formatting checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run check:fast -- --force
+          npx oxfmt --check src/config/ghidraExistingProject.ts src/ghidra/GhidraProjectSnapshot.ts tests/boundary/providers/ghidra/ghidraProjectSnapshot.test.ts
+          git diff --check
