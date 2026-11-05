@@ -30,7 +30,7 @@ jobs:
         run: |
           set -euo pipefail
           git rev-parse HEAD^
-          git diff --exit-code HEAD^ HEAD -- scripts/verify-call-path-goals.mjs tests/boundary/process/callPathGoalsVerifier.test.ts
+          git diff --exit-code 96571c54a3614032da1a2c02507e7391796e9315 HEAD -- scripts/verify-call-path-goals.mjs tests/boundary/process/callPathGoalsVerifier.test.ts
       - name: Install and build
         shell: bash
         run: |
@@ -50,9 +50,5 @@ jobs:
         run: |
           set -euo pipefail
           npm run check:fast -- --force
-          npx oxfmt --check scripts/verify-call-path-goals.mjs tests/boundary/process/callPathGoalsVerifier.test.ts || {
-            npx oxfmt tests/boundary/process/callPathGoalsVerifier.test.ts
-            git --no-pager diff -- tests/boundary/process/callPathGoalsVerifier.test.ts
-            exit 1
-          }
+          npx oxfmt --check scripts/verify-call-path-goals.mjs tests/boundary/process/callPathGoalsVerifier.test.ts
           git diff --check
