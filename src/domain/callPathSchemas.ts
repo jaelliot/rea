@@ -20,12 +20,7 @@ export const callPathInputSchema = z.strictObject({
   functions: z.array(evidenceSchema).min(1),
   start: z.object({ address: nativeAddressInputSchema }).strict(),
   goal: z.object({ address: nativeAddressInputSchema }).strict(),
-  max_paths: z
-    .number()
-    .int()
-    .safe()
-    .positive()
-    .optional(),
+  max_paths: z.number().int().safe().positive().optional(),
 });
 
 const citedNodeSchema = z.object({
