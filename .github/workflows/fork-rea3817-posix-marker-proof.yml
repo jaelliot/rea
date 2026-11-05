@@ -30,7 +30,7 @@ jobs:
         run: |
           set -euo pipefail
           git rev-parse HEAD
-          git diff --exit-code 91bc440f96df396c2595c9b43ae4bac98d95fcd4 HEAD -- src/config/ghidraExistingProject.ts src/ghidra/GhidraProjectSnapshot.ts tests/boundary/providers/ghidra/ghidraProjectSnapshot.test.ts
+          git diff --exit-code fe315ad4048b4ddf587df14cc3430ecab32de212 HEAD -- src/config/ghidraExistingProject.ts src/ghidra/GhidraProjectSnapshot.ts tests/boundary/providers/ghidra/ghidraProjectSnapshot.test.ts
       - name: Install and prepare repository tests
         shell: bash
         run: |
@@ -49,9 +49,5 @@ jobs:
         run: |
           set -euo pipefail
           npm run check:fast -- --force
-          npx oxfmt --check src/config/ghidraExistingProject.ts src/ghidra/GhidraProjectSnapshot.ts tests/boundary/providers/ghidra/ghidraProjectSnapshot.test.ts || {
-            npx oxfmt tests/boundary/providers/ghidra/ghidraProjectSnapshot.test.ts
-            git --no-pager diff -- tests/boundary/providers/ghidra/ghidraProjectSnapshot.test.ts
-            exit 1
-          }
+          npx oxfmt --check src/config/ghidraExistingProject.ts src/ghidra/GhidraProjectSnapshot.ts tests/boundary/providers/ghidra/ghidraProjectSnapshot.test.ts
           git diff --check
