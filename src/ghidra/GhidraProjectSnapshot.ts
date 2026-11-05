@@ -191,7 +191,9 @@ export const resolveGhidraProject = async (
       // A parent symlink can resolve to a path that the caller's marker did not reveal.
       const canonicalMarker = join(projectPath, `${projectName}.gpr`);
       if (!ghidraProjectPathSchema.safeParse(canonicalMarker).success)
-        throw selectionFailure(`Resolved Ghidra project marker is invalid: ${canonicalMarker}`);
+        throw selectionFailure(
+          `Resolved Ghidra project marker is invalid: ${canonicalMarker}`,
+        );
       const program = ghidraProgramNameSchema.safeParse(
         selection.programName ?? basename(target.path),
       );

@@ -7,11 +7,12 @@ export const ghidraProjectPathSchema = z
   .min(1)
   .refine(isAbsolute, "Ghidra project path must be absolute")
   .refine(
-    (path) =>
-      path.endsWith(".gpr") &&
-      basename(path).length > 4 &&
-      (process.platform === "win32" || !path.includes("\\")),
+    (path) => path.endsWith(".gpr") && basename(path).length > 4,
     "Select an expanded .gpr project marker; restore .grez archives first",
+  )
+  .refine(
+    (path) => process.platform === "win32" || !path.includes("\\"),
+    "Ghidra project path cannot contain backslashes on POSIX",
   );
 
 /** Headless -process accepts globs and flags; this workflow selects one program in one folder. */
