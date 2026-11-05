@@ -30,7 +30,7 @@ jobs:
         run: |
           set -euo pipefail
           git rev-parse HEAD^
-          git diff --exit-code HEAD^ HEAD -- src/domain/callPathSchemas.ts src/domain/callPath.ts src/server/registerInvestigationTools.ts tests/boundary/mcp/investigationAnalysisMcp.test.ts
+          git diff --exit-code 9a882f396ff50d78d4f0b28c3f585168455a2707 HEAD -- src/domain/callPathSchemas.ts src/domain/callPath.ts src/server/registerInvestigationTools.ts tests/boundary/mcp/investigationAnalysisMcp.test.ts
       - name: Install and build
         shell: bash
         run: |
