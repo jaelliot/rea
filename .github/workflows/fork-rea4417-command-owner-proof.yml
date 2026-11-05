@@ -1,0 +1,54 @@
+name: Fork-only REA #4417 command-owner verification
+
+on:
+  push:
+    branches:
+      - ci/rea4417-command-owner-proof-20261104
+
+permissions:
+  contents: read
+
+jobs:
+  compiler-lifecycle:
+    if: github.repository == 'jaelliot/rea'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      HUSKY: "0"
+      TURBO_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Verify exact original candidate files
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rev-parse HEAD^
+          git diff --exit-code HEAD^ HEAD -- scripts/verify-call-path-goals.mjs tests/boundary/process/callPathGoalsVerifier.test.ts
+      - name: Install and build
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci
+          npm run build:cached
+          npm run test:prepare
+      - name: Focused call-path verifier cleanup regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check scripts/verify-call-path-goals.mjs
+          npx vitest run tests/boundary/process/callPathGoalsVerifier.test.ts
+          npm run verify:test-discovery
+      - name: Static and formatting checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run check:fast -- --force
+          npx oxfmt --check scripts/verify-call-path-goals.mjs tests/boundary/process/callPathGoalsVerifier.test.ts
+          git diff --check
