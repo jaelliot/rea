@@ -159,6 +159,9 @@ const registerCallPath = (
             parameters: {
               start: input.start.address,
               goal: input.goal.address,
+              ...(input.max_paths === undefined
+                ? {}
+                : { max_paths: input.max_paths }),
             },
             result,
             confidence: "derived",

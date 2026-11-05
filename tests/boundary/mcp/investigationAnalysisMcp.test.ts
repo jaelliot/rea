@@ -114,6 +114,42 @@ it("builds exact-address paths with qualified callees and dossier citations", as
   }
 });
 
+it("preserves omitted and explicit call-path limits in saved Evidence", async () => {
+  const { session, server, client } = await connected();
+  const dossier = dossierWithCallees(["EXTERNAL:0x1000"]);
+  expect(session.recordEvidence(dossier).ok).toBe(true);
+  const input = {
+    functions: [dossier],
+    start: { address: "0x1000" },
+    goal: { address: "EXTERNAL:0x1000" },
+  };
+  const ids = new Set<string>();
+  try {
+    for (const maxPaths of [undefined, 64, 1]) {
+      const response = await client.callTool({
+        name: "build_call_path",
+        arguments:
+          maxPaths === undefined ? input : { ...input, max_paths: maxPaths },
+      });
+      expect(response.isError, JSON.stringify(response)).not.toBe(true);
+      const evidence = inlineEvidence(response.structuredContent);
+      expect(evidence.parameters).toEqual({
+        start: input.start.address,
+        goal: input.goal.address,
+        ...(maxPaths === undefined ? {} : { max_paths: maxPaths }),
+      });
+      expect(evidence.normalized_result).toMatchObject({
+        status: "found",
+        shortest_hops: 1,
+      });
+      ids.add(evidence.evidence_id);
+    }
+    expect(ids.size).toBe(3);
+  } finally {
+    await close(session, server, client);
+  }
+});
+
 it("keeps call-path publication ahead of close_binary record draining", async () => {
   const session = createTestBinarySession(() => ({
     health: () => Promise.resolve(),

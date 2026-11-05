@@ -4,6 +4,7 @@ import {
   callPathInputSchema,
   callPathResultSchema,
   CALL_PATH_REPRESENTATION_BUDGET_BYTES,
+  DEFAULT_CALL_PATH_MAX_PATHS,
   type CallPathResult,
   type OutputCallPath,
 } from "./callPathSchemas.js";
@@ -175,7 +176,7 @@ export const buildCallPath = (input: unknown): CallPathResult => {
           goalDistances,
           snapshots,
           byteBudget: CALL_PATH_REPRESENTATION_BUDGET_BYTES,
-          maxPaths: parsed.max_paths,
+          maxPaths: parsed.max_paths ?? DEFAULT_CALL_PATH_MAX_PATHS,
         });
   const paths = enumeration.paths;
   const exhaustive = search.exhaustive;

@@ -25,7 +25,7 @@ export const callPathInputSchema = z.strictObject({
     .int()
     .safe()
     .positive()
-    .default(DEFAULT_CALL_PATH_MAX_PATHS),
+    .optional(),
 });
 
 const citedNodeSchema = z.object({
