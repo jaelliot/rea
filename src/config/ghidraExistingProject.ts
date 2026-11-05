@@ -7,7 +7,10 @@ export const ghidraProjectPathSchema = z
   .min(1)
   .refine(isAbsolute, "Ghidra project path must be absolute")
   .refine(
-    (path) => path.endsWith(".gpr") && basename(path).length > 4,
+    (path) =>
+      path.endsWith(".gpr") &&
+      basename(path).length > 4 &&
+      (process.platform === "win32" || !path.includes("\\")),
     "Select an expanded .gpr project marker; restore .grez archives first",
   );
 

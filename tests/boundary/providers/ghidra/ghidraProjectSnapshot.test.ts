@@ -67,6 +67,43 @@ it.skipIf(process.platform === "win32")(
   },
 );
 
+it.skipIf(process.platform === "win32")(
+  "rejects backslash-bearing POSIX project marker names before Ghidra selection",
+  async () => {
+    const root = await createTestTempDirectory("rea-ghidra-posix-marker-");
+    const name = "prefix\\Game";
+    const marker = join(root, `${name}.gpr`);
+    await writeFile(marker, "marker");
+    await mkdir(join(root, `${name}.rep`));
+    expect(parseConfig({ REA_GHIDRA_PROJECT_PATH: marker }).ok).toBe(false);
+    await expect(
+      resolveGhidraProject({ path: marker }, { path: "/tmp/target" }, resources),
+    ).rejects.toMatchObject({
+      _tag: "ConfigurationError",
+      settings: [{ setting: "REA_GHIDRA_PROJECT_PATH" }],
+    });
+  },
+);
+
+it.skipIf(process.platform === "win32")(
+  "rejects project parents resolving through a symlink to a POSIX backslash path",
+  async () => {
+    const root = await createTestTempDirectory("rea-ghidra-posix-parent-");
+    const physical = join(root, "part\\dir");
+    await mkdir(join(physical, "selected.rep"), { recursive: true });
+    await writeFile(join(physical, "selected.gpr"), "marker");
+    await symlink(physical, join(root, "alias"));
+    const marker = join(root, "alias", "selected.gpr");
+    expect(parseConfig({ REA_GHIDRA_PROJECT_PATH: marker }).ok).toBe(true);
+    await expect(
+      resolveGhidraProject({ path: marker }, { path: "/tmp/target" }, resources),
+    ).rejects.toMatchObject({
+      _tag: "ConfigurationError",
+      settings: [{ setting: "REA_GHIDRA_PROJECT_PATH" }],
+    });
+  },
+);
+
 it("rejects a project whose copied content differs from the committed analysis profile", async () => {
   const { source, destination } = await fixture();
   const original = await fingerprintGhidraProject(

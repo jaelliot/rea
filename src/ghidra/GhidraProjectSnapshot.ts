@@ -28,6 +28,7 @@ import type { GhidraProjectSelection } from "../config/ghidraExistingProject.js"
 import {
   ghidraProgramFolderSchema,
   ghidraProgramNameSchema,
+  ghidraProjectPathSchema,
 } from "../config/ghidraExistingProject.js";
 
 /** Classify file cancellation/cleanup before the generic provider boundary. */
@@ -187,6 +188,10 @@ export const resolveGhidraProject = async (
         );
       const projectName = basename(selection.path, ".gpr");
       const projectPath = await realpath(dirname(selection.path));
+      // A parent symlink can resolve to a path that the caller's marker did not reveal.
+      const canonicalMarker = join(projectPath, `${projectName}.gpr`);
+      if (!ghidraProjectPathSchema.safeParse(canonicalMarker).success)
+        throw selectionFailure(`Resolved Ghidra project marker is invalid: ${canonicalMarker}`);
       const program = ghidraProgramNameSchema.safeParse(
         selection.programName ?? basename(target.path),
       );
