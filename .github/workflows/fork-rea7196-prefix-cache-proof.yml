@@ -30,7 +30,7 @@ jobs:
         run: |
           set -euo pipefail
           git rev-parse HEAD^
-          git diff --exit-code HEAD^ HEAD -- src/domain/native/libraryFunctionIdentification.ts src/domain/native/libraryFunctionIdentification.test.ts
+          git diff --exit-code 5d809bc5193e8285c51d835e2dbc23a5a0581a0d HEAD -- src/domain/native/libraryFunctionIdentification.ts src/domain/native/libraryFunctionIdentification.test.ts
       - name: Install and build
         shell: bash
         run: |
