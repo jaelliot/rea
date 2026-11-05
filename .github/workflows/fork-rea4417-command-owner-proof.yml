@@ -50,5 +50,9 @@ jobs:
         run: |
           set -euo pipefail
           npm run check:fast -- --force
-          npx oxfmt --check scripts/verify-call-path-goals.mjs tests/boundary/process/callPathGoalsVerifier.test.ts
+          npx oxfmt --check scripts/verify-call-path-goals.mjs tests/boundary/process/callPathGoalsVerifier.test.ts || {
+            npx oxfmt tests/boundary/process/callPathGoalsVerifier.test.ts
+            git --no-pager diff -- tests/boundary/process/callPathGoalsVerifier.test.ts
+            exit 1
+          }
           git diff --check
