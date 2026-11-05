@@ -1,0 +1,54 @@
+name: Fork-only REA #4984 explicit path-limit Evidence verification
+
+on:
+  push:
+    branches:
+      - ci/rea4984-evidence-paths-proof-20261104
+
+permissions:
+  contents: read
+
+jobs:
+  evidence-path-limits:
+    if: github.repository == 'jaelliot/rea'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      HUSKY: "0"
+      TURBO_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Verify source is unchanged from candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rev-parse HEAD^
+          git diff --exit-code HEAD^ HEAD -- src/domain/callPathSchemas.ts src/domain/callPath.ts src/server/registerInvestigationTools.ts tests/boundary/mcp/investigationAnalysisMcp.test.ts
+      - name: Install and build
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci
+          npm run build:cached
+          npm run test:prepare
+      - name: Focused call-path Evidence and domain regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx vitest run tests/boundary/mcp/investigationAnalysisMcp.test.ts src/domain/callPath.test.ts
+          npm run verify:test-discovery
+      - name: Static formatting and contract checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run check:fast -- --force
+          npx oxfmt --check src/domain/callPathSchemas.ts src/domain/callPath.ts src/server/registerInvestigationTools.ts tests/boundary/mcp/investigationAnalysisMcp.test.ts
+          npm run docs:check
+          git diff --check
