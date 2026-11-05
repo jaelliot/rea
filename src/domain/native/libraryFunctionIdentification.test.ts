@@ -109,6 +109,27 @@ describe("identifyLibraryFunctions matching", () => {
     ).toEqual(["exact-a", "exact-z", "short"]);
   });
 
+  it("reuses only the signature-inspectable function prefix", () => {
+    const prefix = Array(MAX_LIBRARY_SIGNATURE_PATTERN_TOKENS - 1).fill(0x90);
+    const result = identifyLibraryFunctions(
+      [
+        { function_id: "a", bytes: [...prefix, 0x91, 0x01] },
+        { function_id: "b", bytes: [...prefix, 0x91, 0x02] },
+        { function_id: "c", bytes: [...prefix, 0x92, 0x02] },
+      ],
+      [
+        signature("one", `${"90 ".repeat(prefix.length)}91`),
+        signature("two", `${"90 ".repeat(prefix.length)}92`),
+      ],
+    );
+    if (!result.ok) throw result.error;
+    expect(
+      result.value.identified.map(({ matches }) =>
+        matches.map(({ signature_id }) => signature_id),
+      ),
+    ).toEqual([["one"], ["one"], ["two"]]);
+  });
+
   it("preserves optional library versions", () => {
     const result = identifyLibraryFunctions(
       [{ function_id: "f1", bytes: [0x90] }],

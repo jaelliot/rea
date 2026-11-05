@@ -357,7 +357,7 @@ const getCandidateMatches = (
   signatures: readonly CompiledSignature[],
   matchCache: Map<string, LibraryFunctionMatch[]>,
 ): LibraryFunctionMatch[] => {
-  const cacheKey = bytes.join(",");
+  const cacheKey = bytes.slice(0, MAX_LIBRARY_SIGNATURE_PATTERN_TOKENS).join(",");
   const cached = matchCache.get(cacheKey);
   if (cached) return cached;
   const result = rankMatches(
